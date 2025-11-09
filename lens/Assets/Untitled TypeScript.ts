@@ -126,7 +126,7 @@ export class NewScript extends BaseScriptComponent {
     }
 
     formatMultiColumn(text: string): string {
-        const MAX_LINE_WIDTH = 100;  // Maximum characters per line
+        const MAX_LINE_WIDTH = 50;  // Maximum characters per line
         const MAX_LINES_PER_COLUMN = 50;  // Maximum lines per column
 
         // Split text into lines and wrap long lines
