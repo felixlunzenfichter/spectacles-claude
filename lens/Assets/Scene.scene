@@ -2935,12 +2935,14 @@
   Enabled: true
   ScriptAsset: !<reference> aad9ceb8-576e-4df9-88c6-2cdd2a7dfa38
   ScriptInputsDefault:
-    {}
+    autoConnect: true
   ScriptTypesDefault:
     {}
   ScriptInputs:
     "":
-      {}
+      textComponent: !<reference.Text3D> d528da98-36f6-4b9f-bb12-9e832e43a8cd
+      serverUrl: "ws://172.20.10.3:8080"
+      autoConnect: true
   ScriptTypes:
     "":
       {}
