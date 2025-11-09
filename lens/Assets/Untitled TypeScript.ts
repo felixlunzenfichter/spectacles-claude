@@ -137,11 +137,27 @@ export class NewScript extends BaseScriptComponent {
             if (line.length <= MAX_LINE_WIDTH) {
                 allLines.push(line);
             } else {
-                // Wrap long lines
+                // Wrap long lines at word boundaries
                 let remaining = line;
                 while (remaining.length > 0) {
-                    allLines.push(remaining.substring(0, MAX_LINE_WIDTH));
-                    remaining = remaining.substring(MAX_LINE_WIDTH);
+                    if (remaining.length <= MAX_LINE_WIDTH) {
+                        allLines.push(remaining);
+                        break;
+                    }
+
+                    // Find the last space within MAX_LINE_WIDTH
+                    let breakPoint = MAX_LINE_WIDTH;
+                    const segment = remaining.substring(0, MAX_LINE_WIDTH);
+                    const lastSpace = segment.lastIndexOf(' ');
+
+                    if (lastSpace > 0) {
+                        // Break at the last space
+                        breakPoint = lastSpace;
+                    }
+                    // else: no space found, break at MAX_LINE_WIDTH (hard break)
+
+                    allLines.push(remaining.substring(0, breakPoint));
+                    remaining = remaining.substring(breakPoint).trimStart();
                 }
             }
         }
