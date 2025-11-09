@@ -35,12 +35,39 @@ def extract_latest_event(file_path):
         for line in reversed(lines):
             line = line.strip()
             if line:
-                # Parse and return the event as-is
+                # Parse the event
                 event = json.loads(line)
                 event_type = event.get('type', 'unknown')
 
-                # Just prepend the type and return raw JSON
-                return f"[{event_type.upper()}]\n{json.dumps(event, indent=2)}"
+                # Filter out unnecessary metadata but keep useful info
+                filtered = {
+                    'type': event_type,
+                    'timestamp': event.get('timestamp')
+                }
+
+                # Keep git branch info
+                if 'gitBranch' in event:
+                    filtered['gitBranch'] = event['gitBranch']
+
+                # Extract message content based on type
+                if 'message' in event:
+                    msg = event['message']
+                    if 'content' in msg:
+                        filtered['content'] = msg['content']
+                    if 'role' in msg:
+                        filtered['role'] = msg['role']
+                    if 'model' in msg:
+                        filtered['model'] = msg['model']
+
+                # For tool results, include the result data
+                if 'toolUseResult' in event:
+                    filtered['toolResult'] = event['toolUseResult']
+
+                # For file snapshots, include snapshot data
+                if 'snapshot' in event:
+                    filtered['snapshot'] = event['snapshot']
+
+                return f"[{event_type.upper()}]\n{json.dumps(filtered, indent=2)}"
 
         return None
     except Exception as e:
@@ -86,13 +113,14 @@ async def broadcast_message(message):
 
     last_sent_message = message
 
-    # Truncate message for display if too long
-    preview = message[:100].replace('\n', ' ')
-    if len(message) > 100:
-        preview += "..."
-
-    log(f"📤 Broadcasting: {preview}")
-    log(f"   To {len(connected_clients)} client(s)")
+    # Print FULL message being sent
+    log("=" * 60)
+    log("📤 FULL MESSAGE BEING SENT:")
+    log("=" * 60)
+    log(message)
+    log("=" * 60)
+    log(f"   Message length: {len(message)} characters")
+    log(f"   Sending to {len(connected_clients)} client(s)")
 
     # Send to all connected clients
     if connected_clients:
@@ -100,8 +128,9 @@ async def broadcast_message(message):
         for client in connected_clients:
             try:
                 await client.send(message)
+                log(f"   ✅ Sent to {client.remote_address}")
             except Exception as e:
-                log(f"❌ Failed to send to client: {e}")
+                log(f"   ❌ Failed to send to {client.remote_address}: {e}")
                 disconnected_clients.add(client)
 
         # Remove disconnected clients
