@@ -118,7 +118,14 @@ export class NewScript extends BaseScriptComponent {
         print("ServerTextDisplay: updateText called with: " + newText);
         if (this.textComponent) {
             const formatted = this.formatMultiColumn(newText);
-            this.textComponent.text = formatted;
+
+            // Append new text instead of replacing
+            if (this.textComponent.text) {
+                this.textComponent.text += "\n\n" + formatted;
+            } else {
+                this.textComponent.text = formatted;
+            }
+
             print("ServerTextDisplay: Text component updated successfully");
         } else {
             print("ServerTextDisplay: ERROR - Text component not assigned!");
