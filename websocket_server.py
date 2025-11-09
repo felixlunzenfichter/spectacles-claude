@@ -39,35 +39,47 @@ def extract_latest_event(file_path):
                 event = json.loads(line)
                 event_type = event.get('type', 'unknown')
 
-                # Filter out unnecessary metadata but keep useful info
-                filtered = {
-                    'type': event_type,
-                    'timestamp': event.get('timestamp')
-                }
+                # Format nicely as human-readable text
+                lines = [f"[{event_type.upper()}]"]
 
-                # Keep git branch info
+                # Add timestamp
+                if 'timestamp' in event:
+                    lines.append(f"Time: {event['timestamp']}")
+
+                # Add git branch
                 if 'gitBranch' in event:
-                    filtered['gitBranch'] = event['gitBranch']
+                    lines.append(f"Branch: {event['gitBranch']}")
 
-                # Extract message content based on type
+                # Extract and format message content
                 if 'message' in event:
                     msg = event['message']
-                    if 'content' in msg:
-                        filtered['content'] = msg['content']
-                    if 'role' in msg:
-                        filtered['role'] = msg['role']
+
+                    # Add model info
                     if 'model' in msg:
-                        filtered['model'] = msg['model']
+                        lines.append(f"Model: {msg['model']}")
 
-                # For tool results, include the result data
-                if 'toolUseResult' in event:
-                    filtered['toolResult'] = event['toolUseResult']
+                    # Add role
+                    if 'role' in msg:
+                        lines.append(f"Role: {msg['role']}")
 
-                # For file snapshots, include snapshot data
-                if 'snapshot' in event:
-                    filtered['snapshot'] = event['snapshot']
+                    # Add content
+                    if 'content' in msg:
+                        content = msg['content']
+                        if isinstance(content, str):
+                            lines.append(f"\n{content}")
+                        elif isinstance(content, list):
+                            for item in content:
+                                if isinstance(item, dict):
+                                    if item.get('type') == 'text':
+                                        lines.append(f"\n{item.get('text', '')}")
+                                    elif item.get('type') == 'tool_use':
+                                        lines.append(f"\nTool: {item.get('name', 'unknown')}")
+                                        lines.append(f"Input: {json.dumps(item.get('input', {}), indent=2)}")
+                                    elif item.get('type') == 'tool_result':
+                                        lines.append(f"\nTool Result:")
+                                        lines.append(f"{item.get('content', '')}")
 
-                return f"[{event_type.upper()}]\n{json.dumps(filtered, indent=2)}"
+                return '\n'.join(lines)
 
         return None
     except Exception as e:
