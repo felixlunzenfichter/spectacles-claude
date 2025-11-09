@@ -4,30 +4,66 @@
     - !<own> 85e2813b-d0ed-4f31-be4e-c1eaf8896fb2
 - !<PassInfo/85e2813b-d0ed-4f31-be4e-c1eaf8896fb2>
   CachedProperties:
-    - InnerEdgeTex:
-        typeIdx: 9
-        value:
-          id: 00000000-0000-0000-0000-000000000000
-          sampler:
-            filteringMode: Trilinear
-            wrapModeU: Repeat
-            wrapModeV: Repeat
-            wrapModeW: Repeat
-            borderColor: {x: 0.000000, y: 0.000000, z: 0.000000, w: 0.000000}
-            mipmaps: false
-          type: Texture2D
-    - InnerEdgeTexOffset:
-        typeIdx: 3
-        value: {x: 1.000000, y: 1.000000}
-    - InnerEdgeTexScale:
-        typeIdx: 3
-        value: {x: 1.000000, y: 1.000000}
+    - InnerEdgeEndingColor:
+        typeIdx: 5
+        value: {x: 0.990000, y: 0.820000, z: 0.100000, w: 1.000000}
+    - InnerEdgeGradientRamp:
+        typeIdx: 1
+        value: 0.000000
+    - InnerEdgeStartingColor:
+        typeIdx: 5
+        value: {x: 0.130000, y: 1.000000, z: 0.820000, w: 1.000000}
     - InnerEdgeTexTransform:
         typeIdx: 7
         value:
           0: {x: 1.000000, y: 0.000000, z: 0.000000}
           1: {x: 0.000000, y: 1.000000, z: 0.000000}
           2: {x: 0.000000, y: 0.000000, z: 1.000000}
+    - Port_Center_N025:
+        typeIdx: 3
+        value: {x: 1.000000, y: 1.000000}
+    - Port_Import_N024:
+        typeIdx: 3
+        value: {x: 1.000000, y: 1.000000}
+    - Port_Import_N026:
+        typeIdx: 3
+        value: {x: 1.000000, y: 1.000000}
+    - Port_Input0_N035:
+        typeIdx: 1
+        value: 0.000000
+    - Port_Input1_N034:
+        typeIdx: 1
+        value: 0.000000
+    - Port_Input1_N035:
+        typeIdx: 1
+        value: 0.000000
+    - Port_Input2_N034:
+        typeIdx: 1
+        value: 0.000000
+    - Port_RangeMaxA_N023:
+        typeIdx: 1
+        value: 0.000000
+    - Port_RangeMaxA_N155:
+        typeIdx: 1
+        value: 0.000000
+    - Port_RangeMaxB_N023:
+        typeIdx: 1
+        value: 0.000000
+    - Port_RangeMaxB_N155:
+        typeIdx: 1
+        value: 0.000000
+    - Port_RangeMinA_N023:
+        typeIdx: 1
+        value: 0.000000
+    - Port_RangeMinA_N155:
+        typeIdx: 1
+        value: 0.000000
+    - Port_RangeMinB_N023:
+        typeIdx: 1
+        value: 0.000000
+    - Port_RangeMinB_N155:
+        typeIdx: 1
+        value: 0.000000
     - backCapTex:
         typeIdx: 9
         value:
@@ -113,24 +149,30 @@
   Defines:
     - DROPLIST_BACK_CAP_MODE 2
     - DROPLIST_FRONT_CAP_MODE 2
-    - DROPLIST_INNER_EDGE_MODE 1
     - DROPLIST_OUTER_EDGE_MODE 1
     - NODE_11_DROPLIST_ITEM 0
     - NODE_151_DROPLIST_ITEM 0
     - NODE_41_DROPLIST_ITEM 0
     - NODE_9_DROPLIST_ITEM 0
+    - DROPLIST_INNER_EDGE_MODE 0
   BlendMode: PremultipliedAlphaAuto
   Properties:
-    InnerEdgeEndingColor:
-      typeIdx: 5
-      value: {x: 0.990000, y: 0.820000, z: 0.100000, w: 1.000000}
-    InnerEdgeGradientRamp:
-      typeIdx: 1
-      value: 0.000000
-    InnerEdgeStartingColor:
-      typeIdx: 5
-      value: {x: 0.130000, y: 1.000000, z: 0.820000, w: 1.000000}
-    Port_Center_N025:
+    InnerEdgeTex:
+      typeIdx: 9
+      value:
+        id: 00000000-0000-0000-0000-000000000000
+        sampler:
+          filteringMode: Trilinear
+          wrapModeU: Repeat
+          wrapModeV: Repeat
+          wrapModeW: Repeat
+          borderColor: {x: 0.000000, y: 0.000000, z: 0.000000, w: 0.000000}
+          mipmaps: false
+        type: Texture2D
+    InnerEdgeTexOffset:
+      typeIdx: 3
+      value: {x: 1.000000, y: 1.000000}
+    InnerEdgeTexScale:
       typeIdx: 3
       value: {x: 1.000000, y: 1.000000}
     Port_Center_N047:
@@ -139,28 +181,13 @@
     Port_Import_N017:
       typeIdx: 3
       value: {x: 1.000000, y: 1.000000}
-    Port_Import_N024:
-      typeIdx: 3
-      value: {x: 1.000000, y: 1.000000}
-    Port_Import_N026:
-      typeIdx: 3
-      value: {x: 1.000000, y: 1.000000}
     Port_Import_N058:
       typeIdx: 3
       value: {x: 1.000000, y: 1.000000}
-    Port_Input0_N035:
-      typeIdx: 1
-      value: 0.000000
     Port_Input0_N066:
       typeIdx: 1
       value: 0.000000
     Port_Input1_N014:
-      typeIdx: 1
-      value: 0.000000
-    Port_Input1_N034:
-      typeIdx: 1
-      value: 0.000000
-    Port_Input1_N035:
       typeIdx: 1
       value: 0.000000
     Port_Input1_N043:
@@ -175,13 +202,7 @@
     Port_Input1_N066:
       typeIdx: 1
       value: 0.000000
-    Port_Input2_N034:
-      typeIdx: 1
-      value: 0.000000
     Port_Input2_N065:
-      typeIdx: 1
-      value: 0.000000
-    Port_RangeMaxA_N023:
       typeIdx: 1
       value: 0.000000
     Port_RangeMaxA_N033:
@@ -190,22 +211,10 @@
     Port_RangeMaxA_N153:
       typeIdx: 1
       value: 0.000000
-    Port_RangeMaxA_N155:
-      typeIdx: 1
-      value: 0.000000
-    Port_RangeMaxB_N023:
-      typeIdx: 1
-      value: 0.000000
     Port_RangeMaxB_N033:
       typeIdx: 1
       value: 0.000000
     Port_RangeMaxB_N153:
-      typeIdx: 1
-      value: 0.000000
-    Port_RangeMaxB_N155:
-      typeIdx: 1
-      value: 0.000000
-    Port_RangeMinA_N023:
       typeIdx: 1
       value: 0.000000
     Port_RangeMinA_N033:
@@ -214,19 +223,10 @@
     Port_RangeMinA_N153:
       typeIdx: 1
       value: 0.000000
-    Port_RangeMinA_N155:
-      typeIdx: 1
-      value: 0.000000
-    Port_RangeMinB_N023:
-      typeIdx: 1
-      value: 0.000000
     Port_RangeMinB_N033:
       typeIdx: 1
       value: 0.000000
     Port_RangeMinB_N153:
-      typeIdx: 1
-      value: 0.000000
-    Port_RangeMinB_N155:
       typeIdx: 1
       value: 0.000000
     PreviewEnabled:
@@ -234,17 +234,17 @@
       value: 0
     backCapStartingColor:
       typeIdx: 5
-      value: {x: 0.990000, y: 0.820000, z: 0.100000, w: 1.000000}
+      value: {x: 0.970443, y: 0.000000, z: 0.404623, w: 1.000000}
     frontCapStartingColor:
       typeIdx: 5
-      value: {x: 0.130000, y: 1.000000, z: 0.820000, w: 1.000000}
+      value: {x: 0.639643, y: 0.256001, z: 1.000000, w: 1.000000}
     outerEdgeEndingColor:
       typeIdx: 5
-      value: {x: 0.990000, y: 0.820000, z: 0.100000, w: 1.000000}
+      value: {x: 0.970443, y: 0.000000, z: 0.444770, w: 1.000000}
     outerEdgeGradientRamp:
       typeIdx: 1
       value: 0.000000
     outerEdgeStartingColor:
       typeIdx: 5
-      value: {x: 0.130000, y: 1.000000, z: 0.820000, w: 1.000000}
+      value: {x: 0.531640, y: 0.000000, z: 0.972717, w: 1.000000}
   Pass: !<reference> c03fbb80-e9c6-4ccf-8884-0cb5828c69f1

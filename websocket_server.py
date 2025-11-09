@@ -37,49 +37,47 @@ def extract_latest_event(file_path):
             if line:
                 # Parse the event
                 event = json.loads(line)
-                event_type = event.get('type', 'unknown')
 
-                # Format nicely as human-readable text
-                lines = [f"[{event_type.upper()}]"]
+                # Extract timestamp (just the time part)
+                timestamp = event.get('timestamp', '')
+                if timestamp:
+                    # Extract HH:MM:SS from ISO timestamp
+                    time_part = timestamp.split('T')[1].split('.')[0] if 'T' in timestamp else timestamp
+                else:
+                    time_part = '??:??:??'
 
-                # Add timestamp
-                if 'timestamp' in event:
-                    lines.append(f"Time: {event['timestamp']}")
-
-                # Add git branch
-                if 'gitBranch' in event:
-                    lines.append(f"Branch: {event['gitBranch']}")
-
-                # Extract and format message content
+                # Extract role from message
                 if 'message' in event:
                     msg = event['message']
+                    role = msg.get('role', 'unknown')
 
-                    # Add model info
-                    if 'model' in msg:
-                        lines.append(f"Model: {msg['model']}")
-
-                    # Add role
-                    if 'role' in msg:
-                        lines.append(f"Role: {msg['role']}")
-
-                    # Add content
+                    # Extract content
+                    content_parts = []
                     if 'content' in msg:
                         content = msg['content']
                         if isinstance(content, str):
-                            lines.append(f"\n{content}")
+                            content_parts.append(content)
                         elif isinstance(content, list):
                             for item in content:
                                 if isinstance(item, dict):
                                     if item.get('type') == 'text':
-                                        lines.append(f"\n{item.get('text', '')}")
+                                        content_parts.append(item.get('text', ''))
                                     elif item.get('type') == 'tool_use':
-                                        lines.append(f"\nTool: {item.get('name', 'unknown')}")
-                                        lines.append(f"Input: {json.dumps(item.get('input', {}), indent=2)}")
+                                        content_parts.append(f"[Tool: {item.get('name', 'unknown')}]")
                                     elif item.get('type') == 'tool_result':
-                                        lines.append(f"\nTool Result:")
-                                        lines.append(f"{item.get('content', '')}")
+                                        content_parts.append(f"[Tool Result]")
 
-                return '\n'.join(lines)
+                    content_text = ' '.join(content_parts)
+
+                    # Trim to 1000 characters
+                    if len(content_text) > 1000:
+                        content_text = content_text[:1000] + "..."
+
+                    # Format: [timestamp] role: content
+                    return f"[{time_part}] {role}: {content_text}"
+
+                # If no message, just show event type
+                return f"[{time_part}] {event.get('type', 'unknown')}"
 
         return None
     except Exception as e:
