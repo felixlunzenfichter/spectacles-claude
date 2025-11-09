@@ -25,82 +25,22 @@ def log(message):
     timestamp = datetime.datetime.now().strftime('%H:%M:%S')
     print(f"[{timestamp}] {message}")
 
-def extract_latest_assistant_message(file_path):
-    """Extract ALL events from a Claude Code .jsonl file and format them."""
+def extract_latest_event(file_path):
+    """Extract the latest event from a Claude Code .jsonl file."""
     try:
         with open(file_path, 'r') as f:
             lines = f.readlines()
 
-        all_events = []
-
-        for line in lines:
+        # Get the last non-empty line
+        for line in reversed(lines):
             line = line.strip()
-            if not line:
-                continue
-
-            try:
+            if line:
+                # Parse and return the event as-is
                 event = json.loads(line)
                 event_type = event.get('type', 'unknown')
 
-                # Format different event types
-                if event_type == 'user':
-                    # User message
-                    message = event.get('message', {})
-                    content = message.get('content', '')
-                    if isinstance(content, str):
-                        all_events.append(f"[USER]\n{content}")
-                    elif isinstance(content, list):
-                        text_parts = []
-                        for item in content:
-                            if item.get('type') == 'text':
-                                text_parts.append(item.get('text', ''))
-                        if text_parts:
-                            all_events.append(f"[USER]\n" + '\n'.join(text_parts))
-
-                elif event_type == 'assistant':
-                    # Assistant message
-                    message = event.get('message', {})
-                    content = message.get('content')
-
-                    if isinstance(content, str):
-                        all_events.append(f"[ASSISTANT]\n{content}")
-                    elif isinstance(content, list):
-                        for item in content:
-                            if item.get('type') == 'text' and item.get('text'):
-                                all_events.append(f"[ASSISTANT]\n{item['text']}")
-                            elif item.get('type') == 'tool_use':
-                                tool_name = item.get('name', 'unknown')
-                                tool_input = json.dumps(item.get('input', {}), indent=2)
-                                all_events.append(f"[TOOL USE: {tool_name}]\n{tool_input}")
-
-                elif event_type == 'tool_result':
-                    # Tool result
-                    tool_name = event.get('tool_name', 'unknown')
-                    result = event.get('result', '')
-                    if isinstance(result, dict):
-                        result = json.dumps(result, indent=2)
-                    all_events.append(f"[TOOL RESULT: {tool_name}]\n{result}")
-
-                elif event_type == 'thinking':
-                    # Thinking block
-                    content = event.get('content', '')
-                    all_events.append(f"[THINKING]\n{content}")
-
-                elif event_type == 'system':
-                    # System message
-                    content = event.get('content', '')
-                    all_events.append(f"[SYSTEM]\n{content}")
-
-                else:
-                    # Unknown type - show raw
-                    all_events.append(f"[{event_type.upper()}]\n{json.dumps(event, indent=2)}")
-
-            except json.JSONDecodeError:
-                continue
-
-        if all_events:
-            # Return all events concatenated
-            return '\n\n---\n\n'.join(all_events)
+                # Just prepend the type and return raw JSON
+                return f"[{event_type.upper()}]\n{json.dumps(event, indent=2)}"
 
         return None
     except Exception as e:
@@ -125,8 +65,8 @@ class ClaudeConversationHandler(FileSystemEventHandler):
 
         log(f"📝 Conversation file changed: {Path(event.src_path).name}")
 
-        # Extract latest assistant message
-        message = extract_latest_assistant_message(event.src_path)
+        # Extract latest event
+        message = extract_latest_event(event.src_path)
 
         if message:
             # Schedule sending the message to all clients
