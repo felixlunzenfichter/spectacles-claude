@@ -63,9 +63,13 @@ def extract_latest_event(file_path):
                                     if item.get('type') == 'text':
                                         content_parts.append(item.get('text', ''))
                                     elif item.get('type') == 'tool_use':
-                                        content_parts.append(f"[Tool: {item.get('name', 'unknown')}]")
+                                        tool_name = item.get('name', 'unknown')
+                                        tool_input = item.get('input', {})
+                                        input_str = json.dumps(tool_input, indent=None)
+                                        content_parts.append(f"[Tool: {tool_name}] {input_str}")
                                     elif item.get('type') == 'tool_result':
-                                        content_parts.append(f"[Tool Result]")
+                                        result_content = item.get('content', '')
+                                        content_parts.append(f"[Tool Result] {result_content}")
 
                     content_text = ' '.join(content_parts)
 
