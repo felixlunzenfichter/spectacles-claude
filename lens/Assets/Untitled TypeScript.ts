@@ -117,11 +117,78 @@ export class NewScript extends BaseScriptComponent {
     updateText(newText: string) {
         print("ServerTextDisplay: updateText called with: " + newText);
         if (this.textComponent) {
-            this.textComponent.text = newText;
+            const formatted = this.formatMultiColumn(newText);
+            this.textComponent.text = formatted;
             print("ServerTextDisplay: Text component updated successfully");
         } else {
             print("ServerTextDisplay: ERROR - Text component not assigned!");
         }
+    }
+
+    formatMultiColumn(text: string): string {
+        const MAX_LINE_WIDTH = 100;  // Maximum characters per line
+        const MAX_LINES_PER_COLUMN = 50;  // Maximum lines per column
+
+        // Split text into lines and wrap long lines
+        const allLines: string[] = [];
+        const rawLines = text.split('\n');
+
+        for (const line of rawLines) {
+            if (line.length <= MAX_LINE_WIDTH) {
+                allLines.push(line);
+            } else {
+                // Wrap long lines
+                let remaining = line;
+                while (remaining.length > 0) {
+                    allLines.push(remaining.substring(0, MAX_LINE_WIDTH));
+                    remaining = remaining.substring(MAX_LINE_WIDTH);
+                }
+            }
+        }
+
+        // Split lines into columns
+        const columns: string[][] = [];
+        for (let i = 0; i < allLines.length; i += MAX_LINES_PER_COLUMN) {
+            columns.push(allLines.slice(i, i + MAX_LINES_PER_COLUMN));
+        }
+
+        // If only one column, return as-is
+        if (columns.length === 1) {
+            return allLines.join('\n');
+        }
+
+        // Find max width needed for each column
+        const columnWidths: number[] = [];
+        for (const column of columns) {
+            let maxWidth = 0;
+            for (const line of column) {
+                if (line.length > maxWidth) {
+                    maxWidth = line.length;
+                }
+            }
+            columnWidths.push(Math.min(maxWidth, MAX_LINE_WIDTH));
+        }
+
+        // Build multi-column output
+        const maxLinesInAnyColumn = Math.max(...columns.map(c => c.length));
+        const result: string[] = [];
+
+        for (let lineIdx = 0; lineIdx < maxLinesInAnyColumn; lineIdx++) {
+            const rowParts: string[] = [];
+
+            for (let colIdx = 0; colIdx < columns.length; colIdx++) {
+                const column = columns[colIdx];
+                const line = lineIdx < column.length ? column[lineIdx] : '';
+
+                // Pad line to column width for alignment
+                const padded = line.padEnd(columnWidths[colIdx], ' ');
+                rowParts.push(padded);
+            }
+
+            result.push(rowParts.join(' | '));
+        }
+
+        return result.join('\n');
     }
 
     updateColor(r: number, g: number, b: number, a: number) {
