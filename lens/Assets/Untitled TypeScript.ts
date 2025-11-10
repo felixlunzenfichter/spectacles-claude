@@ -13,6 +13,7 @@ export class NewScript extends BaseScriptComponent {
     private socket: WebSocket = null;
     private connected: boolean = false;
     private internetModule: any;
+    private rawText: string = "";  // Store raw unformatted text
 
     onAwake() {
         print("ServerTextDisplay: Script initialized");
@@ -117,14 +118,18 @@ export class NewScript extends BaseScriptComponent {
     updateText(newText: string) {
         print("ServerTextDisplay: updateText called with: " + newText);
         if (this.textComponent) {
-            const formatted = this.formatMultiColumn(newText);
-
-            // Append new text instead of replacing
-            if (this.textComponent.text) {
-                this.textComponent.text += "\n\n" + formatted;
+            // Accumulate raw text
+            if (this.rawText) {
+                this.rawText += "\n\n" + newText;
             } else {
-                this.textComponent.text = formatted;
+                this.rawText = newText;
             }
+
+            // Format the ENTIRE accumulated text
+            const formatted = this.formatMultiColumn(this.rawText);
+
+            // Set the text (not append)
+            this.textComponent.text = formatted;
 
             print("ServerTextDisplay: Text component updated successfully");
         } else {
@@ -133,85 +138,80 @@ export class NewScript extends BaseScriptComponent {
     }
 
     formatMultiColumn(text: string): string {
-        const MAX_LINE_WIDTH = 50;  // Maximum characters per line
-        const MAX_LINES_PER_COLUMN = 50;  // Maximum lines per column
+        const MAX_ROWS = 32;
+        const CONTENT_WIDTH = 64;
 
-        // Split text into lines and wrap long lines
         const allLines: string[] = [];
         const rawLines = text.split('\n');
+        let lineNumber = 0;
 
         for (const line of rawLines) {
-            if (line.length <= MAX_LINE_WIDTH) {
-                allLines.push(line);
+            // Prepend line number first
+            const label = lineNumber.toString() + ' ';
+            const lineWithLabel = label + line;
+
+            if (lineWithLabel.length <= CONTENT_WIDTH) {
+                // Fits - pad end (left-aligned)
+                allLines.push(lineWithLabel.padEnd(CONTENT_WIDTH, ' '));
             } else {
-                // Wrap long lines at word boundaries
-                let remaining = line;
+                // Too long - split it
+                const availableWidth = CONTENT_WIDTH - label.length;
+
+                // Find break point for first segment
+                let breakPoint = availableWidth;
+                const segment = line.substring(0, availableWidth);
+                const lastSpace = segment.lastIndexOf(' ');
+                if (lastSpace > 0) {
+                    breakPoint = lastSpace;
+                }
+
+                // First segment with label (pad end)
+                const firstPart = line.substring(0, breakPoint);
+                allLines.push((label + firstPart).padEnd(CONTENT_WIDTH, ' '));
+
+                // Continuation segments (right-aligned, no label)
+                let remaining = line.substring(breakPoint).trimStart();
                 while (remaining.length > 0) {
-                    if (remaining.length <= MAX_LINE_WIDTH) {
-                        allLines.push(remaining);
+                    if (remaining.length <= CONTENT_WIDTH) {
+                        allLines.push(remaining.padStart(CONTENT_WIDTH, ' '));
                         break;
                     }
 
-                    // Find the last space within MAX_LINE_WIDTH
-                    let breakPoint = MAX_LINE_WIDTH;
-                    const segment = remaining.substring(0, MAX_LINE_WIDTH);
-                    const lastSpace = segment.lastIndexOf(' ');
-
-                    if (lastSpace > 0) {
-                        // Break at the last space
-                        breakPoint = lastSpace;
+                    // Find break point
+                    breakPoint = CONTENT_WIDTH;
+                    const seg = remaining.substring(0, CONTENT_WIDTH);
+                    const space = seg.lastIndexOf(' ');
+                    if (space > 0) {
+                        breakPoint = space;
                     }
-                    // else: no space found, break at MAX_LINE_WIDTH (hard break)
 
-                    allLines.push(remaining.substring(0, breakPoint));
+                    allLines.push(remaining.substring(0, breakPoint).padStart(CONTENT_WIDTH, ' '));
                     remaining = remaining.substring(breakPoint).trimStart();
                 }
             }
+
+            lineNumber++;
         }
 
-        // Split lines into columns
-        const columns: string[][] = [];
-        for (let i = 0; i < allLines.length; i += MAX_LINES_PER_COLUMN) {
-            columns.push(allLines.slice(i, i + MAX_LINES_PER_COLUMN));
-        }
+        // Multi-column layout
+        if (allLines.length > MAX_ROWS) {
+            const outputLines: string[] = new Array(MAX_ROWS).fill('');
 
-        // If only one column, return as-is
-        if (columns.length === 1) {
-            return allLines.join('\n');
-        }
+            for (let i = 0; i < allLines.length; i++) {
+                const rowIndex = i % MAX_ROWS;
+                const colIndex = Math.floor(i / MAX_ROWS);
 
-        // Find max width needed for each column
-        const columnWidths: number[] = [];
-        for (const column of columns) {
-            let maxWidth = 0;
-            for (const line of column) {
-                if (line.length > maxWidth) {
-                    maxWidth = line.length;
+                if (colIndex === 0) {
+                    outputLines[rowIndex] = allLines[i];
+                } else {
+                    outputLines[rowIndex] += allLines[i];
                 }
             }
-            columnWidths.push(Math.min(maxWidth, MAX_LINE_WIDTH));
+
+            return outputLines.join('\n');
+        } else {
+            return allLines.join('\n');
         }
-
-        // Build multi-column output
-        const maxLinesInAnyColumn = Math.max(...columns.map(c => c.length));
-        const result: string[] = [];
-
-        for (let lineIdx = 0; lineIdx < maxLinesInAnyColumn; lineIdx++) {
-            const rowParts: string[] = [];
-
-            for (let colIdx = 0; colIdx < columns.length; colIdx++) {
-                const column = columns[colIdx];
-                const line = lineIdx < column.length ? column[lineIdx] : '';
-
-                // Pad line to column width for alignment
-                const padded = line.padEnd(columnWidths[colIdx], ' ');
-                rowParts.push(padded);
-            }
-
-            result.push(rowParts.join(' | '));
-        }
-
-        return result.join('\n');
     }
 
     updateColor(r: number, g: number, b: number, a: number) {

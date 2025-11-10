@@ -73,10 +73,6 @@ def extract_latest_event(file_path):
 
                     content_text = ' '.join(content_parts)
 
-                    # Trim to 1000 characters
-                    if len(content_text) > 1000:
-                        content_text = content_text[:1000] + "..."
-
                     # Format: [timestamp] role: content
                     return f"[{time_part}] {role}: {content_text}"
 
