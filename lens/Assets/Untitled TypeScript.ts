@@ -15,6 +15,10 @@ export class NewScript extends BaseScriptComponent {
     private internetModule: any;
     private rawText: string = "";  // Store raw unformatted text
 
+    private readonly MAX_ROWS = 32;
+    private readonly CONTENT_WIDTH = 64;
+    private completeConversation: string[] = [];
+
     onAwake() {
         print("ServerTextDisplay: Script initialized");
         this.startTime = getTime();
@@ -118,17 +122,14 @@ export class NewScript extends BaseScriptComponent {
     updateText(newText: string) {
         print("ServerTextDisplay: updateText called with: " + newText);
         if (this.textComponent) {
-            // Accumulate raw text
-            if (this.rawText) {
-                this.rawText += "\n\n" + newText;
-            } else {
-                this.rawText = newText;
-            }
+            // Split new text by newline and append to conversation
+            const newLines = newText.split('\n');
+            this.completeConversation.push(...newLines);
 
-            // Format the ENTIRE accumulated text
-            const formatted = this.formatMultiColumn(this.rawText);
+            // Format complete conversation into columns
+            const formatted = this.formatConversation();
 
-            // Set the text (not append)
+            // Set the text
             this.textComponent.text = formatted;
 
             print("ServerTextDisplay: Text component updated successfully");
@@ -137,81 +138,43 @@ export class NewScript extends BaseScriptComponent {
         }
     }
 
-    formatMultiColumn(text: string): string {
-        const MAX_ROWS = 32;
-        const CONTENT_WIDTH = 64;
+    formatConversation(): string {
+        const allRows: string[] = [];
 
-        const allLines: string[] = [];
-        const rawLines = text.split('\n');
-        let lineNumber = 0;
+        for (let i = 0; i < this.completeConversation.length; i++) {
+            const line = this.completeConversation[i];
+            const label = i.toString() + ' ';
+            let remaining = label + line;
 
-        for (const line of rawLines) {
-            // Prepend line number first
-            const label = lineNumber.toString() + ' ';
-            const lineWithLabel = label + line;
-
-            if (lineWithLabel.length <= CONTENT_WIDTH) {
-                // Fits - pad end (left-aligned)
-                allLines.push(lineWithLabel.padEnd(CONTENT_WIDTH, ' '));
-            } else {
-                // Too long - split it
-                const availableWidth = CONTENT_WIDTH - label.length;
-
-                // Find break point for first segment
-                let breakPoint = availableWidth;
-                const segment = line.substring(0, availableWidth);
-                const lastSpace = segment.lastIndexOf(' ');
-                if (lastSpace > 0) {
-                    breakPoint = lastSpace;
-                }
-
-                // First segment with label (pad end)
-                const firstPart = line.substring(0, breakPoint);
-                allLines.push((label + firstPart).padEnd(CONTENT_WIDTH, ' '));
-
-                // Continuation segments (right-aligned, no label)
-                let remaining = line.substring(breakPoint).trimStart();
-                while (remaining.length > 0) {
-                    if (remaining.length <= CONTENT_WIDTH) {
-                        allLines.push(remaining.padStart(CONTENT_WIDTH, ' '));
-                        break;
+            while (remaining.length > 0) {
+                if (remaining.length > this.CONTENT_WIDTH) {
+                    let breakPoint = this.CONTENT_WIDTH;
+                    const segment = remaining.substring(0, this.CONTENT_WIDTH);
+                    const lastSpace = segment.lastIndexOf(' ');
+                    if (lastSpace > 0) {
+                        breakPoint = lastSpace;
                     }
 
-                    // Find break point
-                    breakPoint = CONTENT_WIDTH;
-                    const seg = remaining.substring(0, CONTENT_WIDTH);
-                    const space = seg.lastIndexOf(' ');
-                    if (space > 0) {
-                        breakPoint = space;
-                    }
-
-                    allLines.push(remaining.substring(0, breakPoint).padStart(CONTENT_WIDTH, ' '));
+                    allRows.push(remaining.substring(0, breakPoint).trimEnd().padEnd(this.CONTENT_WIDTH, ' '));
                     remaining = remaining.substring(breakPoint).trimStart();
-                }
-            }
-
-            lineNumber++;
-        }
-
-        // Multi-column layout
-        if (allLines.length > MAX_ROWS) {
-            const outputLines: string[] = new Array(MAX_ROWS).fill('');
-
-            for (let i = 0; i < allLines.length; i++) {
-                const rowIndex = i % MAX_ROWS;
-                const colIndex = Math.floor(i / MAX_ROWS);
-
-                if (colIndex === 0) {
-                    outputLines[rowIndex] = allLines[i];
                 } else {
-                    outputLines[rowIndex] += allLines[i];
+                    allRows.push(remaining.padEnd(this.CONTENT_WIDTH, ' '));
+                    break;
                 }
             }
-
-            return outputLines.join('\n');
-        } else {
-            return allLines.join('\n');
         }
+
+        const displayRows: string[] = [];
+        for (let i = 0; i < this.MAX_ROWS; i++) {
+            displayRows.push('');
+        }
+
+        for (let i = 0; i < allRows.length; i++) {
+            const rowIndex = i % this.MAX_ROWS;
+            displayRows[rowIndex] += ' ' + allRows[i];
+        }
+
+        return displayRows.join('\n');
     }
 
     updateColor(r: number, g: number, b: number, a: number) {
