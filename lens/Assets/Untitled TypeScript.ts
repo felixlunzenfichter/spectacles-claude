@@ -140,11 +140,13 @@ export class NewScript extends BaseScriptComponent {
 
     formatConversation(): string {
         const allRows: string[] = [];
+        const isFirstSegment: boolean[] = [];
 
+        // Step 1: Convert each conversation line into formatted rows (NO labels, NO padding)
         for (let i = 0; i < this.completeConversation.length; i++) {
             const line = this.completeConversation[i];
-            const label = i.toString() + ' ';
-            let remaining = label + line;
+            let remaining = line;
+            let isFirst = true;
 
             while (remaining.length > 0) {
                 if (remaining.length > this.CONTENT_WIDTH) {
@@ -155,23 +157,50 @@ export class NewScript extends BaseScriptComponent {
                         breakPoint = lastSpace;
                     }
 
-                    allRows.push(remaining.substring(0, breakPoint).trimEnd().padEnd(this.CONTENT_WIDTH, ' '));
-                    remaining = remaining.substring(breakPoint).trimStart();
+                    allRows.push(remaining.substring(0, breakPoint));
+                    isFirstSegment.push(isFirst);
+                    remaining = remaining.substring(breakPoint);
+                    isFirst = false;
                 } else {
-                    allRows.push(remaining.padEnd(this.CONTENT_WIDTH, ' '));
+                    allRows.push(remaining);
+                    isFirstSegment.push(isFirst);
                     break;
                 }
             }
         }
 
+        // Step 2: Create empty display grid
         const displayRows: string[] = [];
         for (let i = 0; i < this.MAX_ROWS; i++) {
             displayRows.push('');
         }
 
+        // Step 3: Add labels and padding, then prepend to display grid
         for (let i = 0; i < allRows.length; i++) {
             const rowIndex = i % this.MAX_ROWS;
-            displayRows[rowIndex] += ' ' + allRows[i];
+            const label = i.toString() + ' ';
+            let formattedRow: string;
+
+            if (isFirstSegment[i]) {
+                // First segment: left-aligned (padEnd)
+                formattedRow = label + allRows[i].padEnd(this.CONTENT_WIDTH, ' ');
+            } else {
+                // Continuation: right-aligned (padStart)
+                formattedRow = label + allRows[i].padStart(this.CONTENT_WIDTH, ' ');
+            }
+
+            displayRows[rowIndex] = formattedRow + ' ' + displayRows[rowIndex];
+        }
+
+        // Step 4: Prepend empty rows to push older content right
+        const emptyRowsNeeded = allRows.length % this.MAX_ROWS;
+        if (emptyRowsNeeded > 0) {
+            for (let i = emptyRowsNeeded; i < this.MAX_ROWS; i++) {
+                const emptyRowIndex = allRows.length + (i - emptyRowsNeeded);
+                const label = emptyRowIndex.toString() + ' ';
+                const emptyRow = label + ''.padEnd(this.CONTENT_WIDTH, ' ');
+                displayRows[i] = emptyRow + ' ' + displayRows[i];
+            }
         }
 
         return displayRows.join('\n');
