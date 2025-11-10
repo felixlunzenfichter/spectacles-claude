@@ -189,18 +189,23 @@ export class NewScript extends BaseScriptComponent {
                 formattedRow = label + allRows[i].padStart(this.CONTENT_WIDTH, ' ');
             }
 
-            displayRows[rowIndex] = formattedRow + ' ' + displayRows[rowIndex];
+            displayRows[rowIndex] = displayRows[rowIndex] + ' ' + formattedRow;
         }
 
-        // Step 4: Prepend empty rows to push older content right
+        // Step 4: Append empty rows to push older content left
         const emptyRowsNeeded = allRows.length % this.MAX_ROWS;
         if (emptyRowsNeeded > 0) {
             for (let i = emptyRowsNeeded; i < this.MAX_ROWS; i++) {
                 const emptyRowIndex = allRows.length + (i - emptyRowsNeeded);
                 const label = emptyRowIndex.toString() + ' ';
                 const emptyRow = label + ''.padEnd(this.CONTENT_WIDTH, ' ');
-                displayRows[i] = emptyRow + ' ' + displayRows[i];
+                displayRows[i] = displayRows[i] + ' ' + emptyRow;
             }
+        }
+
+        // Add bar at the end of each row
+        for (let i = 0; i < displayRows.length; i++) {
+            displayRows[i] += '|';
         }
 
         return displayRows.join('\n');
