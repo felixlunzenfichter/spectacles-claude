@@ -27,9 +27,6 @@ echo "  - Local:      ws://localhost:8080"
 echo "  - Spectacles: ws://$MAC_IP:8080"
 echo ""
 
-# Click the Preview Lens button in Lens Studio
-echo "Clicking Preview Lens button in Lens Studio..."
-"$SCRIPT_DIR/click-lens-button.sh"
 
 echo ""
 echo "=============================================="
