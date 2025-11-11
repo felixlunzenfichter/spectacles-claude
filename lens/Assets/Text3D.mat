@@ -258,7 +258,7 @@
   DepthFunction: LessEqual
   TwoSided: false
   ColorMask: {x: true, y: true, z: true, w: true}
-  CullMode: Back
+  CullMode: Front
   PolygonOffset: {x: 0.000000, y: 0.000000}
   FrustumCulling: Auto
   FrustumCullPad: 0.000000
@@ -273,7 +273,7 @@
     - DROPLIST_OUTER_EDGE_MODE 2
     - DROPLIST_INNER_EDGE_MODE 2
     - DROPLIST_BACK_CAP_MODE 2
-  BlendMode: PremultipliedAlphaAuto
+  BlendMode: Disabled
   Properties:
     InnerEdgeStartingColor:
       typeIdx: 5
@@ -313,7 +313,7 @@
       value: 1.000000
     frontCapStartingColor:
       typeIdx: 5
-      value: {x: 1.000000, y: 0.000000, z: 0.009277, w: 1.000000}
+      value: {x: 0.000000, y: 1.000000, z: 0.981460, w: 1.000000}
     outerEdgeStartingColor:
       typeIdx: 5
       value: {x: 0.000000, y: 0.000000, z: 0.000000, w: 0.500008}
