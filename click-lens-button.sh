@@ -7,10 +7,15 @@ tell application "Lens Studio" to activate
 delay 1
 tell application "System Events"
     tell process "Lens Studio"
-        tell window "lens* - Lens Studio v5.15.1.25102815"
-            click button "Preview Lens"
-            return "Success: Clicked Preview Lens button"
-        end tell
+        repeat with w from 1 to count of windows
+            if name of window w contains "lens" then
+                tell window w
+                    click button "Preview Lens"
+                    return "Success: Clicked Preview Lens button"
+                end tell
+                exit repeat
+            end if
+        end repeat
     end tell
 end tell
 EOF
