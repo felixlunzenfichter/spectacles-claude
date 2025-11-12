@@ -1,7 +1,7 @@
 @component
 export class NewScript extends BaseScriptComponent {
     @input
-    textComponent: Text3D;
+    textComponent: Text;
 
     @input
     serverUrl: string = "ws://172.20.10.3:8080";  // Mac server IP address
@@ -209,18 +209,5 @@ export class NewScript extends BaseScriptComponent {
         }
 
         return displayRows.join('\n');
-    }
-
-    updateColor(r: number, g: number, b: number, a: number) {
-        if (this.textComponent) {
-            this.textComponent.mainMaterial.mainPass.baseColor = new vec4(r, g, b, a);
-        }
-    }
-
-    updateSize(scale: number) {
-        if (this.textComponent) {
-            const transform = this.textComponent.getSceneObject().getTransform();
-            transform.setLocalScale(new vec3(scale, scale, scale));
-        }
     }
 }
