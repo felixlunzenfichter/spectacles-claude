@@ -10,6 +10,7 @@ import datetime
 import traceback
 import json
 import os
+import aiohttp
 from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -20,10 +21,94 @@ connected_clients = set()
 # Store last sent message to avoid duplicates
 last_sent_message = None
 
+# Store sun times for color calculation
+sun_times_data = None
+location_data = None
+
 def log(message):
     """Print a timestamped log message."""
     timestamp = datetime.datetime.now().strftime('%H:%M:%S')
     print(f"[{timestamp}] {message}")
+
+async def fetch_location():
+    """Fetch current location based on IP address."""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get('http://ip-api.com/json/') as response:
+                data = await response.json()
+                if data.get('status') == 'success':
+                    return {
+                        'city': data.get('city', 'Unknown'),
+                        'country': data.get('country', 'Unknown'),
+                        'lat': data.get('lat'),
+                        'lon': data.get('lon'),
+                        'timezone': data.get('timezone', 'Unknown')
+                    }
+    except Exception as e:
+        log(f"❌ Error fetching location: {e}")
+    return None
+
+async def fetch_sun_times(lat, lon):
+    """Fetch sunrise/sunset times from API."""
+    try:
+        url = f"https://api.sunrise-sunset.org/json?lat={lat}&lng={lon}&formatted=0"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                data = await response.json()
+                if data.get('status') == 'OK':
+                    results = data.get('results', {})
+
+                    # Convert UTC times to local datetime objects
+                    def parse_time(utc_time_str):
+                        try:
+                            dt = datetime.datetime.fromisoformat(utc_time_str.replace('Z', '+00:00'))
+                            return dt.astimezone()
+                        except:
+                            return None
+
+                    return {
+                        'astronomical_dawn': parse_time(results.get('astronomical_twilight_begin', '')),
+                        'nautical_dawn': parse_time(results.get('nautical_twilight_begin', '')),
+                        'civil_dawn': parse_time(results.get('civil_twilight_begin', '')),
+                        'sunrise': parse_time(results.get('sunrise', '')),
+                        'solar_noon': parse_time(results.get('solar_noon', '')),
+                        'sunset': parse_time(results.get('sunset', '')),
+                        'civil_dusk': parse_time(results.get('civil_twilight_end', '')),
+                        'nautical_dusk': parse_time(results.get('nautical_twilight_end', '')),
+                        'astronomical_dusk': parse_time(results.get('astronomical_twilight_end', ''))
+                    }
+    except Exception as e:
+        log(f"❌ Error fetching sun times: {e}")
+    return None
+
+def get_sun_phase_color(sun_times):
+    """Determine current sun phase and return (color, phase_name)."""
+    if not sun_times:
+        return ((1.0, 0.0, 0.0, 1.0), "night")  # Default to night (red)
+
+    now = datetime.datetime.now().astimezone()
+
+    civil_dawn = sun_times['civil_dawn']
+    sunrise = sun_times['sunrise']
+    solar_noon = sun_times['solar_noon']
+    sunset = sun_times['sunset']
+    civil_dusk = sun_times['civil_dusk']
+
+    if civil_dawn <= now < sunrise:
+        # Dawn: yellow (100% red + 100% green)
+        return ((1.0, 1.0, 0.0, 1.0), "dawn")
+    elif sunrise <= now < solar_noon:
+        # Morning: blue (100% blue)
+        return ((0.0, 0.0, 1.0, 1.0), "morning")
+    elif solar_noon <= now < sunset:
+        # Afternoon: white (100% everything)
+        return ((1.0, 1.0, 1.0, 1.0), "afternoon")
+    elif sunset <= now < civil_dusk:
+        # Dusk: orange (100% red + 50% green)
+        return ((1.0, 0.5, 0.0, 1.0), "dusk")
+    else:
+        # Night: red (100% red)
+        return ((1.0, 0.0, 0.0, 1.0), "night")
 
 def extract_latest_event(file_path):
     """Extract the latest event from a Claude Code .jsonl file."""
@@ -149,6 +234,8 @@ async def broadcast_message(message):
 
 async def handle_client(websocket):
     """Handle a client connection."""
+    global sun_times_data, location_data
+
     # Add client to set
     connected_clients.add(websocket)
     client_addr = websocket.remote_address
@@ -161,6 +248,15 @@ async def handle_client(websocket):
         log(f"📤 SENDING to {client_addr}: '{welcome_msg}'")
         await websocket.send(welcome_msg)
         log(f"✅ SENT welcome message successfully")
+
+        # Send color and phase based on sun position
+        if sun_times_data and location_data:
+            color, phase = get_sun_phase_color(sun_times_data)
+            color_msg = f"COLOR:{color[0]},{color[1]},{color[2]},{color[3]}|PHASE:{phase}"
+
+            log(f"📤 Sending to {client_addr}: {phase} - {color}")
+            await websocket.send(color_msg)
+            log(f"✅ Color and phase sent successfully")
 
         # If we have a previous message, send it
         if last_sent_message:
@@ -191,6 +287,8 @@ async def handle_client(websocket):
 
 async def main():
     """Start the WebSocket server and file watcher."""
+    global sun_times_data, location_data
+
     host = "0.0.0.0"  # Listen on all interfaces
     port = 8080
 
@@ -201,6 +299,44 @@ async def main():
     log(f"Port: {port}")
     log(f"Local URL: ws://localhost:{port}")
     log(f"Network URL: ws://[YOUR_MAC_IP]:{port}")
+    log("=" * 60)
+
+    # Fetch and log location and sun times
+    log("")
+    log("☀️  Fetching location and sun times...")
+    # Hardcoded to Vienna, 1st District (Innere Stadt)
+    location = {
+        'city': 'Vienna',
+        'country': 'Austria',
+        'lat': 48.2082,
+        'lon': 16.3738,
+        'timezone': 'Europe/Vienna'
+    }
+    if location:
+        location_data = location  # Store globally
+        log(f"📍 Location: {location['city']}, {location['country']}")
+        log(f"   Coordinates: {location['lat']:.4f}, {location['lon']:.4f}")
+        log(f"   Timezone: {location['timezone']}")
+
+        sun_times = await fetch_sun_times(location['lat'], location['lon'])
+        if sun_times:
+            sun_times_data = sun_times  # Store globally
+            log("")
+            log("🌅 Sun Times for Today (local time):")
+            log(f"   Astronomical Dawn: {sun_times['astronomical_dawn']}")
+            log(f"   Nautical Dawn:     {sun_times['nautical_dawn']}")
+            log(f"   Civil Dawn:        {sun_times['civil_dawn']}")
+            log(f"   Sunrise:           {sun_times['sunrise']}")
+            log(f"   Solar Noon:        {sun_times['solar_noon']}")
+            log(f"   Sunset:            {sun_times['sunset']}")
+            log(f"   Civil Dusk:        {sun_times['civil_dusk']}")
+            log(f"   Nautical Dusk:     {sun_times['nautical_dusk']}")
+            log(f"   Astronomical Dusk: {sun_times['astronomical_dusk']}")
+        else:
+            log("❌ Failed to fetch sun times")
+    else:
+        log("❌ Failed to fetch location")
+    log("")
     log("=" * 60)
 
     # Set up file watcher for Claude Code conversations

@@ -14,6 +14,8 @@ export class NewScript extends BaseScriptComponent {
     private connected: boolean = false;
     private internetModule: any;
     private rawText: string = "";  // Store raw unformatted text
+    private lastReconnectAttempt: number = 0;
+    private reconnectDelay: number = 1.0;  // Try reconnecting every 1 second
 
     private readonly MAX_ROWS = 32;
     private readonly CONTENT_WIDTH = 64;
@@ -62,6 +64,24 @@ export class NewScript extends BaseScriptComponent {
                 }
 
                 print("ServerTextDisplay: Message content: " + messageText);
+
+                // Check if this is a COLOR message
+                if (messageText.startsWith("COLOR:")) {
+                    const parts = messageText.split("|");
+                    const colorPart = parts[0].substring(6); // Remove "COLOR:"
+                    const rgba = colorPart.split(",");
+                    if (rgba.length === 4) {
+                        const r = parseFloat(rgba[0]);
+                        const g = parseFloat(rgba[1]);
+                        const b = parseFloat(rgba[2]);
+                        const a = parseFloat(rgba[3]);
+                        print("ServerTextDisplay: Setting color to " + r + "," + g + "," + b + "," + a);
+                        this.updateColor(r, g, b, a);
+                    }
+                    // Don't display COLOR messages as text
+                    return;
+                }
+
                 this.updateText(messageText);
             };
 
@@ -81,7 +101,8 @@ export class NewScript extends BaseScriptComponent {
                 print("ServerTextDisplay: Was clean: " + event.wasClean);
                 print("ServerTextDisplay: Server URL: " + this.serverUrl);
                 this.connected = false;
-                this.updateText("Disconnected from server");
+                this.socket = null;
+                this.updateText("Disconnected - will reconnect...");
             };
 
         } catch (error) {
@@ -116,6 +137,14 @@ export class NewScript extends BaseScriptComponent {
         if (!this.connected) {
             const elapsed = getTime() - this.startTime;
             this.updateText(`Waiting for server...\n${elapsed.toFixed(1)}s`);
+
+            // Try to reconnect every second
+            const currentTime = getTime();
+            if (currentTime - this.lastReconnectAttempt >= this.reconnectDelay) {
+                print("ServerTextDisplay: Attempting to reconnect...");
+                this.lastReconnectAttempt = currentTime;
+                this.connectToServer();
+            }
         }
     }
 
@@ -209,5 +238,11 @@ export class NewScript extends BaseScriptComponent {
         }
 
         return displayRows.join('\n');
+    }
+
+    updateColor(r: number, g: number, b: number, a: number) {
+        if (this.textComponent) {
+            this.textComponent.textFill.color = new vec4(r, g, b, a);
+        }
     }
 }
