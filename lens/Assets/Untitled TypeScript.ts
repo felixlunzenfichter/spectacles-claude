@@ -4,6 +4,9 @@ export class NewScript extends BaseScriptComponent {
     textComponent: Text;
 
     @input
+    image: Image;
+
+    @input
     serverUrl: string = "ws://172.20.10.3:8080";  // Mac server IP address
 
     @input
@@ -15,7 +18,9 @@ export class NewScript extends BaseScriptComponent {
     private internetModule: any;
     private rawText: string = "";  // Store raw unformatted text
     private lastReconnectAttempt: number = 0;
-    private reconnectDelay: number = 1.0;  // Try reconnecting every 1 second
+    private reconnectDelay: number = 10.0;  // Try reconnecting every 10 seconds
+    private lastPrintTime: number = 0;
+    private printDelay: number = 1.0;  // Print status every 1 second
 
     private readonly MAX_ROWS = 32;
     private readonly CONTENT_WIDTH = 64;
@@ -63,7 +68,19 @@ export class NewScript extends BaseScriptComponent {
                     messageText = event.data;
                 }
 
-                print("ServerTextDisplay: Message content: " + messageText);
+                print("ServerTextDisplay: Message content: " + messageText.substring(0, 100));
+
+                // Check if this is a screenshot JSON message
+                try {
+                    const message = JSON.parse(messageText);
+                    if (message.type === "screenshot") {
+                        print(`Screenshot received: ${message.width}x${message.height}`);
+                        this.updateScreenshot(message.width, message.height, message.pixels);
+                        return;
+                    }
+                } catch (error) {
+                    // Not JSON, continue processing as text
+                }
 
                 // Check if this is a COLOR message
                 if (messageText.startsWith("COLOR:")) {
@@ -135,11 +152,16 @@ export class NewScript extends BaseScriptComponent {
     onUpdate() {
         // If not connected, show waiting message with elapsed time
         if (!this.connected) {
-            const elapsed = getTime() - this.startTime;
-            this.updateText(`Waiting for server...\n${elapsed.toFixed(1)}s`);
-
-            // Try to reconnect every second
             const currentTime = getTime();
+
+            // Update text only once per second
+            if (currentTime - this.lastPrintTime >= this.printDelay) {
+                const elapsed = currentTime - this.startTime;
+                this.updateText(`Waiting for server...\n${elapsed.toFixed(1)}s`);
+                this.lastPrintTime = currentTime;
+            }
+
+            // Try to reconnect every 10 seconds
             if (currentTime - this.lastReconnectAttempt >= this.reconnectDelay) {
                 print("ServerTextDisplay: Attempting to reconnect...");
                 this.lastReconnectAttempt = currentTime;
@@ -243,6 +265,43 @@ export class NewScript extends BaseScriptComponent {
     updateColor(r: number, g: number, b: number, a: number) {
         if (this.textComponent) {
             this.textComponent.textFill.color = new vec4(r, g, b, a);
+        }
+    }
+
+    updateScreenshot(width: number, height: number, pixels: number[][]) {
+        if (!this.image) {
+            print("No image component assigned for screenshot");
+            return;
+        }
+
+        print(`Rendering screenshot: ${width}x${height} (${pixels.length} pixels)...`);
+
+        try {
+            const newTex = ProceduralTextureProvider.createWithFormat(
+                width,
+                height,
+                TextureFormat.RGBA8Unorm
+            );
+
+            const pixelData = new Uint8Array(width * height * 4);
+
+            // Fill with screenshot pixels
+            for (let i = 0; i < pixels.length; i++) {
+                const [x, y, r, g, b] = pixels[i];
+                const index = (y * width + x) * 4;
+                pixelData[index + 0] = r;
+                pixelData[index + 1] = g;
+                pixelData[index + 2] = b;
+                pixelData[index + 3] = 255;
+            }
+
+            const provider = newTex.control as ProceduralTextureProvider;
+            provider.setPixels(0, 0, width, height, pixelData);
+            this.image.mainPass.baseTex = newTex;
+
+            print(`Screenshot displayed: ${width}x${height}`);
+        } catch (error) {
+            print(`Error rendering screenshot: ${error}`);
         }
     }
 }
