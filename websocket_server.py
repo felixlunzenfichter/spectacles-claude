@@ -14,6 +14,7 @@ import aiohttp
 from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+from PIL import ImageGrab
 
 # Store connected clients
 connected_clients = set()
@@ -29,6 +30,47 @@ def log(message):
     """Print a timestamped log message."""
     timestamp = datetime.datetime.now().strftime('%H:%M:%S')
     print(f"[{timestamp}] {message}")
+
+def capture_screenshot():
+    """Capture a screenshot and return pixel data."""
+    log("📸 Capturing screenshot...")
+
+    # Capture the screen
+    screenshot = ImageGrab.grab()
+
+    original_width, original_height = screenshot.size
+    log(f"   Original resolution: {original_width}x{original_height}")
+
+    # Resize to 256x256
+    target_size = 256
+    screenshot = screenshot.resize((target_size, target_size))
+    log(f"   Resized to: {target_size}x{target_size}")
+
+    # Convert to RGB (in case it's RGBA)
+    screenshot = screenshot.convert('RGB')
+
+    # Get pixel data
+    pixels = screenshot.load()
+
+    # Create pixel data array
+    pixel_data = {
+        'type': 'screenshot',
+        'width': target_size,
+        'height': target_size,
+        'pixels': []
+    }
+
+    log(f"   Extracting {target_size * target_size} pixels...")
+
+    for y in range(target_size):
+        for x in range(target_size):
+            r, g, b = pixels[x, y]
+            # Format: [x, y, r, g, b]
+            pixel_data['pixels'].append([x, y, r, g, b])
+
+    log(f"✅ Screenshot captured: {len(pixel_data['pixels'])} pixels")
+
+    return pixel_data
 
 async def fetch_location():
     """Fetch current location based on IP address."""
@@ -263,6 +305,13 @@ async def handle_client(websocket):
             preview = last_sent_message[:80].replace('\n', ' ')
             log(f"📤 Sending last message to new client: {preview}...")
             await websocket.send(last_sent_message)
+
+        # Capture and send screenshot
+        screenshot_data = capture_screenshot()
+        screenshot_json = json.dumps(screenshot_data)
+        log(f"📤 Sending screenshot data ({len(screenshot_json)} bytes)...")
+        await websocket.send(screenshot_json)
+        log(f"✅ Screenshot data sent successfully")
 
         # Listen for messages from client
         log(f"👂 Listening for messages from {client_addr}")

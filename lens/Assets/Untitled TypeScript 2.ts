@@ -3,8 +3,11 @@ export class NewScript extends BaseScriptComponent {
     @input
     image: Image;
 
-    private width: number = 256;
-    private height: number = 256;
+    @input
+    serverUrl: string = "ws://172.20.10.3:8080";
+
+    private socket: WebSocket = null;
+    private internetModule: any;
 
     onAwake() {
         if (!this.image) {
@@ -12,40 +15,62 @@ export class NewScript extends BaseScriptComponent {
             return;
         }
 
-        this.updatePixels();
+        this.internetModule = require("LensStudio:InternetModule");
+        this.connectWebSocket();
     }
 
-    updatePixels() {
-        // Create the procedural texture programmatically
+    connectWebSocket() {
+        try {
+            this.socket = this.internetModule.createWebSocket(this.serverUrl);
+
+            this.socket.onmessage = async (event) => {
+                let messageText: string;
+                if (event.data instanceof Blob) {
+                    messageText = await event.data.text();
+                } else {
+                    messageText = event.data;
+                }
+
+                try {
+                    const message = JSON.parse(messageText);
+                    if (message.type === "screenshot") {
+                        this.updatePixels(message.pixels);
+                    }
+                } catch (error) {
+                    // Not screenshot JSON, ignore
+                }
+            };
+        } catch (error) {
+            print("Failed to connect: " + error);
+        }
+    }
+
+    updatePixels(pixels: number[][]) {
+        const width = 256;
+        const height = 256;
+
         const newTex = ProceduralTextureProvider.createWithFormat(
-            this.width,
-            this.height,
+            width,
+            height,
             TextureFormat.RGBA8Unorm
         );
 
-        // Create RGBA pixel data array (4 values per pixel: R, G, B, A)
-        const pixelData = new Uint8Array(this.width * this.height * 4);
+        const pixelData = new Uint8Array(width * height * 4);
 
-        // Set each pixel to a different color
-        for (let y = 0; y < this.height; y++) {
-            for (let x = 0; x < this.width; x++) {
-                const index = (y * this.width + x) * 4;
-
-                // Create a gradient effect
-                pixelData[index + 0] = (x / this.width) * 255;      // Red increases left to right
-                pixelData[index + 1] = (y / this.height) * 255;     // Green increases bottom to top
-                pixelData[index + 2] = 128;                          // Blue constant
-                pixelData[index + 3] = 255;                          // Alpha full
-            }
+        // Fill with screenshot pixels
+        for (let i = 0; i < pixels.length; i++) {
+            const [x, y, r, g, b] = pixels[i];
+            const index = (y * width + x) * 4;
+            pixelData[index + 0] = r;
+            pixelData[index + 1] = g;
+            pixelData[index + 2] = b;
+            pixelData[index + 3] = 255;
         }
 
-        // Apply the pixel data to the texture
         const provider = newTex.control as ProceduralTextureProvider;
-        provider.setPixels(0, 0, this.width, this.height, pixelData);
-
-        // Apply the texture to the image
+        provider.setPixels(0, 0, width, height, pixelData);
         this.image.mainPass.baseTex = newTex;
 
-        print("Pixels updated successfully!");
+        print("Screenshot displayed!");
     }
 }

@@ -10,7 +10,7 @@
   DepthWrite: false
   DepthTest: false
   DepthFunction: LessEqual
-  TwoSided: false
+  TwoSided: true
   ColorMask: {x: true, y: true, z: true, w: true}
   CullMode: Back
   PolygonOffset: {x: 0.000000, y: 0.000000}
