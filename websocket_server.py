@@ -350,6 +350,16 @@ async def broadcast_message(message):
         for client in disconnected_clients:
             connected_clients.discard(client)
 
+async def continuous_delta_updates(websocket, prev_screenshot):
+    """Recursively capture and send delta updates."""
+    new_screenshot = ImageGrab.grab()
+
+    for packet in generate_delta_packets(prev_screenshot, new_screenshot):
+        packet_json = json.dumps(packet)
+        await websocket.send(packet_json)
+
+    await continuous_delta_updates(websocket, new_screenshot)
+
 async def handle_client(websocket):
     """Handle a client connection."""
     global sun_times_data, location_data
@@ -367,12 +377,10 @@ async def handle_client(websocket):
         await websocket.send(welcome_msg)
         log(f"✅ SENT welcome message successfully")
 
-        # Get screenshot and resize to Full HD (1920x1240)
+        # Get native screen dimensions
         screenshot = ImageGrab.grab()
-        original_size = screenshot.size
-        screenshot = screenshot.resize((1920, 1240))
         width, height = screenshot.size
-        log(f"📸 Screenshot: {original_size[0]}x{original_size[1]} → {width}x{height}")
+        log(f"📸 Native screen dimensions: {width}x{height}")
 
         # Send color and phase based on sun position
         if sun_times_data and location_data:
@@ -389,44 +397,13 @@ async def handle_client(websocket):
             log(f"📤 Sending last message to new client: {preview}...")
             await websocket.send(last_sent_message)
 
-        # Send initial full screenshot
-        log(f"📤 Sending initial screenshot...")
-        log(f"   Screen resolution: {width}x{height}")
+        # Start with black screen (no initial full screenshot)
+        from PIL import Image
+        prev_screenshot = Image.new('RGB', (width, height), (0, 0, 0))
 
-        packet_count = 0
-        for packet in generate_screenshot_packets(screenshot):
-            packet_json = json.dumps(packet)
-            await websocket.send(packet_json)
-            packet_count += 1
-
-        log(f"✅ Initial screenshot sent ({packet_count} packets)")
-
-        # Store as previous screenshot
-        prev_screenshot = screenshot
-
-        # Continuous delta updates loop
-        log(f"🔄 Starting continuous delta updates (every 1 second)")
-        while True:
-            await asyncio.sleep(1.0)
-
-            # Capture new screenshot
-            new_screenshot = ImageGrab.grab()
-            new_screenshot = new_screenshot.resize((1920, 1240))
-
-            # Generate and send delta packets
-            delta_count = 0
-            total_changed_pixels = 0
-            for packet in generate_delta_packets(prev_screenshot, new_screenshot):
-                total_changed_pixels += len(packet['pixels'])
-                packet_json = json.dumps(packet)
-                await websocket.send(packet_json)
-                delta_count += 1
-
-            if total_changed_pixels > 0:
-                log(f"📊 Delta update: {total_changed_pixels} pixels changed ({delta_count} packets)")
-
-            # Update previous screenshot
-            prev_screenshot = new_screenshot
+        # Start recursive delta updates
+        log(f"🔄 Starting recursive delta updates")
+        await continuous_delta_updates(websocket, prev_screenshot)
 
     except websockets.exceptions.ConnectionClosed as e:
         log(f"🔌 CLIENT DISCONNECTED: {client_addr}")
