@@ -336,10 +336,10 @@ async def handle_client(websocket):
         await websocket.send(welcome_msg)
         log(f"✅ SENT welcome message successfully")
 
-        # Get screenshot and resize to 2K (2560x1653)
+        # Get screenshot and resize to Full HD (1920x1240)
         screenshot = ImageGrab.grab()
         original_size = screenshot.size
-        screenshot = screenshot.resize((2560, 1653))
+        screenshot = screenshot.resize((1920, 1240))
         width, height = screenshot.size
         log(f"📸 Screenshot: {original_size[0]}x{original_size[1]} → {width}x{height}")
 
@@ -380,7 +380,7 @@ async def handle_client(websocket):
 
             # Capture new screenshot
             new_screenshot = ImageGrab.grab()
-            new_screenshot = new_screenshot.resize((2560, 1653))
+            new_screenshot = new_screenshot.resize((1920, 1240))
 
             # Generate and send delta packets
             delta_count = 0
