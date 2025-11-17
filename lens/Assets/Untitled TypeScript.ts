@@ -51,7 +51,27 @@ export class NewScript extends BaseScriptComponent {
     handleScreenshotPacket(message: any) {
         if (!this.pixelData || !this.currentProvider) return;
 
-        const pixels = message.pixels;
+        let pixels = message.pixels;
+
+        if (message.compressed) {
+            const expanded = [];
+            for (let i = 0; i < pixels.length; i++) {
+                const pixel = pixels[i];
+                const x = pixel[0];
+                const y = pixel[1];
+                const r = pixel[2];
+                const g = pixel[3];
+                const b = pixel[4];
+                const count = pixel[5] || 1;
+
+                for (let j = 0; j < count; j++) {
+                    expanded.push([x + j, y, r, g, b]);
+                }
+            }
+            print(`Decompressed ${pixels.length} → ${expanded.length} pixels`);
+            pixels = expanded;
+        }
+
         for (let i = 0; i < pixels.length; i++) {
             const [x, y, r, g, b] = pixels[i];
             const index = (y * this.screenshotWidth + x) * 4;

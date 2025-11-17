@@ -56,6 +56,33 @@ def capture_screenshot_metadata():
 
     return metadata, screenshot
 
+def compress_pixels_rle(pixels):
+    if not pixels:
+        return []
+
+    compressed = []
+    i = 0
+
+    while i < len(pixels):
+        x, y, r, g, b = pixels[i]
+        count = 1
+
+        while i + count < len(pixels):
+            next_pixel = pixels[i + count]
+            next_x, next_y, next_r, next_g, next_b = next_pixel
+
+            if (next_y == y and
+                next_x == x + count and
+                next_r == r and next_g == g and next_b == b):
+                count += 1
+            else:
+                break
+
+        compressed.append([x, y, r, g, b, count])
+        i += count
+
+    return compressed
+
 def generate_screenshot_packets(screenshot, pixels_per_packet=100000):
     """Generator that yields screenshot packets."""
     width, height = screenshot.size
@@ -103,17 +130,21 @@ def generate_delta_packets(prev_screenshot, new_screenshot, pixels_per_packet=10
                 pixel_buffer.append([x, height - 1 - y, new_r, new_g, new_b])
 
                 if len(pixel_buffer) >= pixels_per_packet:
+                    compressed = compress_pixels_rle(pixel_buffer)
                     packet = {
                         'type': 'screenshot_packet',
-                        'pixels': pixel_buffer
+                        'pixels': compressed,
+                        'compressed': True
                     }
                     yield packet
                     pixel_buffer = []
 
     if pixel_buffer:
+        compressed = compress_pixels_rle(pixel_buffer)
         packet = {
             'type': 'screenshot_packet',
-            'pixels': pixel_buffer
+            'pixels': compressed,
+            'compressed': True
         }
         yield packet
 
