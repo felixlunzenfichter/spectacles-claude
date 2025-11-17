@@ -24,7 +24,14 @@ export class NewScript extends BaseScriptComponent {
 
     private readonly MAX_ROWS = 32;
     private readonly CONTENT_WIDTH = 64;
+    private readonly MAX_CONVERSATION_LINES = 200;
     private completeConversation: string[] = [];
+
+    private screenshotWidth: number = 0;
+    private screenshotHeight: number = 0;
+    private currentTexture: Texture = null;
+    private currentProvider: ProceduralTextureProvider = null;
+    private pixelData: Uint8Array = null;
 
     onAwake() {
         print("ServerTextDisplay: Script initialized");
@@ -39,6 +46,23 @@ export class NewScript extends BaseScriptComponent {
 
         this.createEvent("UpdateEvent").bind(this.onUpdate.bind(this));
         print("ServerTextDisplay: Update event bound");
+    }
+
+    handleScreenshotPacket(message: any) {
+        if (!this.pixelData || !this.currentProvider) return;
+
+        const pixels = message.pixels;
+        for (let i = 0; i < pixels.length; i++) {
+            const [x, y, r, g, b] = pixels[i];
+            const index = (y * this.screenshotWidth + x) * 4;
+            this.pixelData[index + 0] = r;
+            this.pixelData[index + 1] = g;
+            this.pixelData[index + 2] = b;
+            this.pixelData[index + 3] = 255;
+        }
+
+        this.currentProvider.setPixels(0, 0, this.screenshotWidth, this.screenshotHeight, this.pixelData);
+        print(`Updated image with ${pixels.length} pixels`);
     }
 
     connectToServer() {
@@ -68,18 +92,24 @@ export class NewScript extends BaseScriptComponent {
                     messageText = event.data;
                 }
 
-                print("ServerTextDisplay: Message content: " + messageText.substring(0, 100));
-
                 // Check if this is a screenshot JSON message
                 try {
                     const message = JSON.parse(messageText);
-                    if (message.type === "screenshot") {
-                        print(`Screenshot received: ${message.width}x${message.height}`);
-                        this.updateScreenshot(message.width, message.height, message.pixels);
+
+                    // Only log non-packet messages to avoid spam
+                    if (message.type !== "screenshot_packet") {
+                        print("ServerTextDisplay: Received " + message.type);
+                    }
+
+                    if (message.type === "screenshot_packet") {
+                        this.handleScreenshotPacket(message);
                         return;
                     }
                 } catch (error) {
                     // Not JSON, continue processing as text
+                    if (messageText.length < 200) {
+                        print("ServerTextDisplay: Non-JSON message: " + messageText.substring(0, 100));
+                    }
                 }
 
                 // Check if this is a COLOR message
@@ -95,6 +125,34 @@ export class NewScript extends BaseScriptComponent {
                         print("ServerTextDisplay: Setting color to " + r + "," + g + "," + b + "," + a);
                         this.updateColor(r, g, b, a);
                     }
+
+                    // Parse WIDTH and HEIGHT if present
+                    for (let i = 1; i < parts.length; i++) {
+                        if (parts[i].startsWith("WIDTH:")) {
+                            this.screenshotWidth = parseInt(parts[i].substring(6));
+                        } else if (parts[i].startsWith("HEIGHT:")) {
+                            this.screenshotHeight = parseInt(parts[i].substring(7));
+                        }
+                    }
+
+                    // Create texture if we have dimensions
+                    if (this.screenshotWidth > 0 && this.screenshotHeight > 0 && this.image) {
+                        print(`Creating texture: ${this.screenshotWidth}x${this.screenshotHeight}`);
+                        try {
+                            this.currentTexture = ProceduralTextureProvider.createWithFormat(
+                                this.screenshotWidth,
+                                this.screenshotHeight,
+                                TextureFormat.RGBA8Unorm
+                            );
+                            this.currentProvider = this.currentTexture.control as ProceduralTextureProvider;
+                            this.pixelData = new Uint8Array(this.screenshotWidth * this.screenshotHeight * 4);
+                            this.image.mainPass.baseTex = this.currentTexture;
+                            print("Texture created");
+                        } catch (error) {
+                            print(`ERROR: ${error}`);
+                        }
+                    }
+
                     // Don't display COLOR messages as text
                     return;
                 }
@@ -176,6 +234,11 @@ export class NewScript extends BaseScriptComponent {
             // Split new text by newline and append to conversation
             const newLines = newText.split('\n');
             this.completeConversation.push(...newLines);
+
+            // Keep only the last 200 lines
+            if (this.completeConversation.length > this.MAX_CONVERSATION_LINES) {
+                this.completeConversation = this.completeConversation.slice(-this.MAX_CONVERSATION_LINES);
+            }
 
             // Format complete conversation into columns
             const formatted = this.formatConversation();
@@ -268,40 +331,4 @@ export class NewScript extends BaseScriptComponent {
         }
     }
 
-    updateScreenshot(width: number, height: number, pixels: number[][]) {
-        if (!this.image) {
-            print("No image component assigned for screenshot");
-            return;
-        }
-
-        print(`Rendering screenshot: ${width}x${height} (${pixels.length} pixels)...`);
-
-        try {
-            const newTex = ProceduralTextureProvider.createWithFormat(
-                width,
-                height,
-                TextureFormat.RGBA8Unorm
-            );
-
-            const pixelData = new Uint8Array(width * height * 4);
-
-            // Fill with screenshot pixels
-            for (let i = 0; i < pixels.length; i++) {
-                const [x, y, r, g, b] = pixels[i];
-                const index = (y * width + x) * 4;
-                pixelData[index + 0] = r;
-                pixelData[index + 1] = g;
-                pixelData[index + 2] = b;
-                pixelData[index + 3] = 255;
-            }
-
-            const provider = newTex.control as ProceduralTextureProvider;
-            provider.setPixels(0, 0, width, height, pixelData);
-            this.image.mainPass.baseTex = newTex;
-
-            print(`Screenshot displayed: ${width}x${height}`);
-        } catch (error) {
-            print(`Error rendering screenshot: ${error}`);
-        }
-    }
 }

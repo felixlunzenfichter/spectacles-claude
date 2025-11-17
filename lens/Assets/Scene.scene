@@ -149,7 +149,7 @@
   LocalTransform: !<TransformEntity>
     Position: {x: 0.000000, y: 200.000000, z: -500.000000}
     Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
-    Scale: {x: 32.000000, y: 32.000000, z: 10.000000}
+    Scale: {x: 500.000000, y: 500.000000, z: 10.000000}
     HasSegmentScaleCompensation: false
   Children:
     []
@@ -159,17 +159,20 @@
 - !<ScriptComponent/7d8d3250-e2c7-454f-a089-7a62340e0c18>
   PrefabRemaps:
     []
-  Name: Untitled TypeScript 2
+  Name: Untitled TypeScript
   Enabled: true
-  ScriptAsset: !<reference> c9dd59c5-a197-4a81-b97e-4435a5af3be7
+  ScriptAsset: !<reference> aad9ceb8-576e-4df9-88c6-2cdd2a7dfa38
   ScriptInputsDefault:
     serverUrl: true
+    autoConnect: true
   ScriptTypesDefault:
     {}
   ScriptInputs:
     "":
+      textComponent: !<reference.Text> 012bc09d-c49f-4216-9831-7d5549ad4917
       image: !<reference.Image> c3216d35-9779-4704-bfbd-0adf4c30a8bc
       serverUrl: "ws://172.20.10.3:8080"
+      autoConnect: true
   ScriptTypes:
     "":
       {}
@@ -232,6 +235,7 @@
   ScriptInputs:
     "":
       textComponent: !<reference.Text> 012bc09d-c49f-4216-9831-7d5549ad4917
+      image: !<reference.Image> c3216d35-9779-4704-bfbd-0adf4c30a8bc
       serverUrl: "ws://172.20.10.3:8080"
       autoConnect: true
   ScriptTypes:

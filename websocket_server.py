@@ -31,46 +31,58 @@ def log(message):
     timestamp = datetime.datetime.now().strftime('%H:%M:%S')
     print(f"[{timestamp}] {message}")
 
-def capture_screenshot():
-    """Capture a screenshot and return pixel data."""
-    log("📸 Capturing screenshot...")
+def capture_screenshot_metadata():
+    """Capture screenshot and return only metadata."""
+    log("📸 Capturing screenshot metadata...")
 
-    # Capture the screen
     screenshot = ImageGrab.grab()
+    width, height = screenshot.size
+    total_pixels = width * height
+    pixels_per_packet = 10000
+    total_packets = (total_pixels + pixels_per_packet - 1) // pixels_per_packet
 
-    original_width, original_height = screenshot.size
-    log(f"   Original resolution: {original_width}x{original_height}")
+    log(f"   Screen resolution: {width}x{height}")
+    log(f"   Total pixels: {total_pixels:,}")
+    log(f"   Packets needed: {total_packets:,} ({pixels_per_packet} pixels each)")
 
-    # Resize to 256x256
-    target_size = 256
-    screenshot = screenshot.resize((target_size, target_size))
-    log(f"   Resized to: {target_size}x{target_size}")
-
-    # Convert to RGB (in case it's RGBA)
-    screenshot = screenshot.convert('RGB')
-
-    # Get pixel data
-    pixels = screenshot.load()
-
-    # Create pixel data array
-    pixel_data = {
-        'type': 'screenshot',
-        'width': target_size,
-        'height': target_size,
-        'pixels': []
+    metadata = {
+        'type': 'screenshot_start',
+        'width': width,
+        'height': height,
+        'total_pixels': total_pixels,
+        'total_packets': total_packets,
+        'pixels_per_packet': pixels_per_packet
     }
 
-    log(f"   Extracting {target_size * target_size} pixels...")
+    return metadata, screenshot
 
-    for y in range(target_size):
-        for x in range(target_size):
+def generate_screenshot_packets(screenshot, pixels_per_packet=1000000):
+    """Generator that yields screenshot packets."""
+    width, height = screenshot.size
+    screenshot = screenshot.convert('RGB')
+    pixels = screenshot.load()
+
+    pixel_buffer = []
+
+    for y in range(height):
+        for x in range(width):
             r, g, b = pixels[x, y]
-            # Format: [x, y, r, g, b]
-            pixel_data['pixels'].append([x, y, r, g, b])
+            pixel_buffer.append([x, height - 1 - y, r, g, b])
 
-    log(f"✅ Screenshot captured: {len(pixel_data['pixels'])} pixels")
+            if len(pixel_buffer) >= pixels_per_packet:
+                packet = {
+                    'type': 'screenshot_packet',
+                    'pixels': pixel_buffer
+                }
+                yield packet
+                pixel_buffer = []
 
-    return pixel_data
+    if pixel_buffer:
+        packet = {
+            'type': 'screenshot_packet',
+            'pixels': pixel_buffer
+        }
+        yield packet
 
 async def fetch_location():
     """Fetch current location based on IP address."""
@@ -291,14 +303,18 @@ async def handle_client(websocket):
         await websocket.send(welcome_msg)
         log(f"✅ SENT welcome message successfully")
 
+        # Get screenshot dimensions for handshake
+        screenshot = ImageGrab.grab()
+        width, height = screenshot.size
+
         # Send color and phase based on sun position
         if sun_times_data and location_data:
             color, phase = get_sun_phase_color(sun_times_data)
-            color_msg = f"COLOR:{color[0]},{color[1]},{color[2]},{color[3]}|PHASE:{phase}"
+            color_msg = f"COLOR:{color[0]},{color[1]},{color[2]},{color[3]}|PHASE:{phase}|WIDTH:{width}|HEIGHT:{height}"
 
-            log(f"📤 Sending to {client_addr}: {phase} - {color}")
+            log(f"📤 Sending to {client_addr}: {phase} - {color} - {width}x{height}")
             await websocket.send(color_msg)
-            log(f"✅ Color and phase sent successfully")
+            log(f"✅ Color and dimensions sent successfully")
 
         # If we have a previous message, send it
         if last_sent_message:
@@ -306,12 +322,19 @@ async def handle_client(websocket):
             log(f"📤 Sending last message to new client: {preview}...")
             await websocket.send(last_sent_message)
 
-        # Capture and send screenshot
-        screenshot_data = capture_screenshot()
-        screenshot_json = json.dumps(screenshot_data)
-        log(f"📤 Sending screenshot data ({len(screenshot_json)} bytes)...")
-        await websocket.send(screenshot_json)
-        log(f"✅ Screenshot data sent successfully")
+        # Stream screenshot packets (just pixel data)
+        log(f"📤 Streaming screenshot packets...")
+        log(f"   Screen resolution: {width}x{height}")
+
+        packet_count = 0
+        for packet in generate_screenshot_packets(screenshot):
+            packet_json = json.dumps(packet)
+            await websocket.send(packet_json)
+            packet_count += 1
+            if packet_count % 100 == 0:
+                log(f"   Sent {packet_count} packets...")
+
+        log(f"✅ Screenshot streaming complete ({packet_count} packets sent)")
 
         # Listen for messages from client
         log(f"👂 Listening for messages from {client_addr}")
