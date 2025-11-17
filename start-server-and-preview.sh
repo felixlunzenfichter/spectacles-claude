@@ -28,6 +28,26 @@ echo "  - Spectacles: ws://$MAC_IP:8080"
 echo ""
 
 
+echo "Opening Lens Studio project and clicking Preview..."
+open "$SCRIPT_DIR/lens/lens.esproj"
+
+osascript <<'EOF'
+tell application "Lens Studio" to activate
+delay 5
+tell application "System Events"
+    tell process "Lens Studio"
+        repeat with w from 1 to count of windows
+            if name of window w contains "lens" then
+                tell window w
+                    click button "Preview Lens"
+                end tell
+                exit repeat
+            end if
+        end repeat
+    end tell
+end tell
+EOF
+
 echo ""
 echo "=============================================="
 echo "Server is running. Press Ctrl+C to stop."
