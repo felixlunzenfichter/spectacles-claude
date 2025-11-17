@@ -56,7 +56,7 @@ def capture_screenshot_metadata():
 
     return metadata, screenshot
 
-def generate_screenshot_packets(screenshot, pixels_per_packet=1000000):
+def generate_screenshot_packets(screenshot, pixels_per_packet=100000):
     """Generator that yields screenshot packets."""
     width, height = screenshot.size
     screenshot = screenshot.convert('RGB')
@@ -76,6 +76,39 @@ def generate_screenshot_packets(screenshot, pixels_per_packet=1000000):
                 }
                 yield packet
                 pixel_buffer = []
+
+    if pixel_buffer:
+        packet = {
+            'type': 'screenshot_packet',
+            'pixels': pixel_buffer
+        }
+        yield packet
+
+def generate_delta_packets(prev_screenshot, new_screenshot, pixels_per_packet=100000):
+    """Generator that yields only changed pixels."""
+    width, height = new_screenshot.size
+    prev_screenshot = prev_screenshot.convert('RGB')
+    new_screenshot = new_screenshot.convert('RGB')
+    prev_pixels = prev_screenshot.load()
+    new_pixels = new_screenshot.load()
+
+    pixel_buffer = []
+
+    for y in range(height):
+        for x in range(width):
+            prev_r, prev_g, prev_b = prev_pixels[x, y]
+            new_r, new_g, new_b = new_pixels[x, y]
+
+            if prev_r != new_r or prev_g != new_g or prev_b != new_b:
+                pixel_buffer.append([x, height - 1 - y, new_r, new_g, new_b])
+
+                if len(pixel_buffer) >= pixels_per_packet:
+                    packet = {
+                        'type': 'screenshot_packet',
+                        'pixels': pixel_buffer
+                    }
+                    yield packet
+                    pixel_buffer = []
 
     if pixel_buffer:
         packet = {
@@ -303,9 +336,12 @@ async def handle_client(websocket):
         await websocket.send(welcome_msg)
         log(f"✅ SENT welcome message successfully")
 
-        # Get screenshot dimensions for handshake
+        # Get screenshot and resize to 2K (2560x1653)
         screenshot = ImageGrab.grab()
+        original_size = screenshot.size
+        screenshot = screenshot.resize((2560, 1653))
         width, height = screenshot.size
+        log(f"📸 Screenshot: {original_size[0]}x{original_size[1]} → {width}x{height}")
 
         # Send color and phase based on sun position
         if sun_times_data and location_data:
@@ -322,8 +358,8 @@ async def handle_client(websocket):
             log(f"📤 Sending last message to new client: {preview}...")
             await websocket.send(last_sent_message)
 
-        # Stream screenshot packets (just pixel data)
-        log(f"📤 Streaming screenshot packets...")
+        # Send initial full screenshot
+        log(f"📤 Sending initial screenshot...")
         log(f"   Screen resolution: {width}x{height}")
 
         packet_count = 0
@@ -331,20 +367,35 @@ async def handle_client(websocket):
             packet_json = json.dumps(packet)
             await websocket.send(packet_json)
             packet_count += 1
-            if packet_count % 100 == 0:
-                log(f"   Sent {packet_count} packets...")
 
-        log(f"✅ Screenshot streaming complete ({packet_count} packets sent)")
+        log(f"✅ Initial screenshot sent ({packet_count} packets)")
 
-        # Listen for messages from client
-        log(f"👂 Listening for messages from {client_addr}")
-        async for message in websocket:
-            log(f"📥 RECEIVED from {client_addr}: '{message}'")
-            # Echo back
-            response = f"Server received: {message}"
-            log(f"📤 SENDING response: '{response}'")
-            await websocket.send(response)
-            log(f"✅ Response sent successfully")
+        # Store as previous screenshot
+        prev_screenshot = screenshot
+
+        # Continuous delta updates loop
+        log(f"🔄 Starting continuous delta updates (every 1 second)")
+        while True:
+            await asyncio.sleep(1.0)
+
+            # Capture new screenshot
+            new_screenshot = ImageGrab.grab()
+            new_screenshot = new_screenshot.resize((2560, 1653))
+
+            # Generate and send delta packets
+            delta_count = 0
+            total_changed_pixels = 0
+            for packet in generate_delta_packets(prev_screenshot, new_screenshot):
+                total_changed_pixels += len(packet['pixels'])
+                packet_json = json.dumps(packet)
+                await websocket.send(packet_json)
+                delta_count += 1
+
+            if total_changed_pixels > 0:
+                log(f"📊 Delta update: {total_changed_pixels} pixels changed ({delta_count} packets)")
+
+            # Update previous screenshot
+            prev_screenshot = new_screenshot
 
     except websockets.exceptions.ConnectionClosed as e:
         log(f"🔌 CLIENT DISCONNECTED: {client_addr}")
