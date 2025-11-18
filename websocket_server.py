@@ -31,30 +31,6 @@ def log(message):
     timestamp = datetime.datetime.now().strftime('%H:%M:%S')
     print(f"[{timestamp}] {message}")
 
-def capture_screenshot_metadata():
-    """Capture screenshot and return only metadata."""
-    log("📸 Capturing screenshot metadata...")
-
-    screenshot = ImageGrab.grab()
-    width, height = screenshot.size
-    total_pixels = width * height
-    pixels_per_packet = 10000
-    total_packets = (total_pixels + pixels_per_packet - 1) // pixels_per_packet
-
-    log(f"   Screen resolution: {width}x{height}")
-    log(f"   Total pixels: {total_pixels:,}")
-    log(f"   Packets needed: {total_packets:,} ({pixels_per_packet} pixels each)")
-
-    metadata = {
-        'type': 'screenshot_start',
-        'width': width,
-        'height': height,
-        'total_pixels': total_pixels,
-        'total_packets': total_packets,
-        'pixels_per_packet': pixels_per_packet
-    }
-
-    return metadata, screenshot
 
 def compress_pixels_rle(pixels):
     if not pixels:
@@ -133,8 +109,7 @@ def generate_delta_packets(prev_screenshot, new_screenshot, pixels_per_packet=10
                     compressed = compress_pixels_rle(pixel_buffer)
                     packet = {
                         'type': 'screenshot_packet',
-                        'pixels': compressed,
-                        'compressed': True
+                        'pixels': compressed
                     }
                     yield packet
                     pixel_buffer = []
@@ -143,28 +118,10 @@ def generate_delta_packets(prev_screenshot, new_screenshot, pixels_per_packet=10
         compressed = compress_pixels_rle(pixel_buffer)
         packet = {
             'type': 'screenshot_packet',
-            'pixels': compressed,
-            'compressed': True
+            'pixels': compressed
         }
         yield packet
 
-async def fetch_location():
-    """Fetch current location based on IP address."""
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get('http://ip-api.com/json/') as response:
-                data = await response.json()
-                if data.get('status') == 'success':
-                    return {
-                        'city': data.get('city', 'Unknown'),
-                        'country': data.get('country', 'Unknown'),
-                        'lat': data.get('lat'),
-                        'lon': data.get('lon'),
-                        'timezone': data.get('timezone', 'Unknown')
-                    }
-    except Exception as e:
-        log(f"❌ Error fetching location: {e}")
-    return None
 
 async def fetch_sun_times(lat, lon):
     """Fetch sunrise/sunset times from API."""
@@ -186,13 +143,9 @@ async def fetch_sun_times(lat, lon):
 
                     return {
                         'astronomical_dawn': parse_time(results.get('astronomical_twilight_begin', '')),
-                        'nautical_dawn': parse_time(results.get('nautical_twilight_begin', '')),
-                        'civil_dawn': parse_time(results.get('civil_twilight_begin', '')),
                         'sunrise': parse_time(results.get('sunrise', '')),
                         'solar_noon': parse_time(results.get('solar_noon', '')),
                         'sunset': parse_time(results.get('sunset', '')),
-                        'civil_dusk': parse_time(results.get('civil_twilight_end', '')),
-                        'nautical_dusk': parse_time(results.get('nautical_twilight_end', '')),
                         'astronomical_dusk': parse_time(results.get('astronomical_twilight_end', ''))
                     }
     except Exception as e:
@@ -206,22 +159,22 @@ def get_sun_phase_color(sun_times):
 
     now = datetime.datetime.now().astimezone()
 
-    civil_dawn = sun_times['civil_dawn']
+    astronomical_dawn = sun_times['astronomical_dawn']
     sunrise = sun_times['sunrise']
     solar_noon = sun_times['solar_noon']
     sunset = sun_times['sunset']
-    civil_dusk = sun_times['civil_dusk']
+    astronomical_dusk = sun_times['astronomical_dusk']
 
-    if civil_dawn <= now < sunrise:
+    if astronomical_dawn <= now < sunrise:
         # Dawn: yellow (100% red + 100% green)
         return ((1.0, 1.0, 0.0, 1.0), "dawn")
     elif sunrise <= now < solar_noon:
         # Morning: blue (100% blue)
         return ((0.0, 0.0, 1.0, 1.0), "morning")
     elif solar_noon <= now < sunset:
-        # Afternoon: white (100% everything)
-        return ((1.0, 1.0, 1.0, 1.0), "afternoon")
-    elif sunset <= now < civil_dusk:
+        # Afternoon: 50% blue (light blue)
+        return ((0.0, 0.0, 0.5, 1.0), "afternoon")
+    elif sunset <= now < astronomical_dusk:
         # Dusk: orange (100% red + 50% green)
         return ((1.0, 0.5, 0.0, 1.0), "dusk")
     else:
@@ -371,31 +324,36 @@ async def handle_client(websocket):
     log(f"   Total clients: {len(connected_clients)}")
 
     try:
-        # Send welcome message
-        welcome_msg = "Connected! Watching Claude Code conversations..."
-        log(f"📤 SENDING to {client_addr}: '{welcome_msg}'")
-        await websocket.send(welcome_msg)
-        log(f"✅ SENT welcome message successfully")
-
         # Get native screen dimensions
         screenshot = ImageGrab.grab()
         width, height = screenshot.size
         log(f"📸 Native screen dimensions: {width}x{height}")
 
-        # Send color and phase based on sun position
-        if sun_times_data and location_data:
-            color, phase = get_sun_phase_color(sun_times_data)
-            color_msg = f"COLOR:{color[0]},{color[1]},{color[2]},{color[3]}|PHASE:{phase}|WIDTH:{width}|HEIGHT:{height}"
+        # Get color and phase based on sun position
+        color, phase = get_sun_phase_color(sun_times_data) if sun_times_data else ((1.0, 0.0, 0.0, 1.0), "night")
 
-            log(f"📤 Sending to {client_addr}: {phase} - {color} - {width}x{height}")
-            await websocket.send(color_msg)
-            log(f"✅ Color and dimensions sent successfully")
+        # Create single initialization message
+        init_message = {
+            'type': 'init',
+            'width': width,
+            'height': height,
+            'color': {
+                'r': color[0],
+                'g': color[1],
+                'b': color[2],
+                'a': color[3]
+            },
+            'last_message': last_sent_message if last_sent_message else None
+        }
 
-        # If we have a previous message, send it
-        if last_sent_message:
-            preview = last_sent_message[:80].replace('\n', ' ')
-            log(f"📤 Sending last message to new client: {preview}...")
-            await websocket.send(last_sent_message)
+        log(f"📤 Sending init to {client_addr}: {phase} - {color} - {width}x{height}")
+        await websocket.send(json.dumps(init_message))
+        log(f"✅ Init message sent successfully")
+
+        # Wait for acknowledgement from client
+        log(f"⏳ Waiting for acknowledgement from {client_addr}...")
+        ack = await websocket.recv()
+        log(f"✅ Received acknowledgement: {ack}")
 
         # Start with black screen (no initial full screenshot)
         from PIL import Image
@@ -434,7 +392,7 @@ async def main():
 
     # Fetch and log location and sun times
     log("")
-    log("☀️  Fetching location and sun times...")
+    log("☀️  Fetching sun times...")
     # Hardcoded to Vienna, 1st District (Innere Stadt)
     location = {
         'city': 'Vienna',
@@ -443,30 +401,23 @@ async def main():
         'lon': 16.3738,
         'timezone': 'Europe/Vienna'
     }
-    if location:
-        location_data = location  # Store globally
-        log(f"📍 Location: {location['city']}, {location['country']}")
-        log(f"   Coordinates: {location['lat']:.4f}, {location['lon']:.4f}")
-        log(f"   Timezone: {location['timezone']}")
+    location_data = location  # Store globally
+    log(f"📍 Location: {location['city']}, {location['country']}")
+    log(f"   Coordinates: {location['lat']:.4f}, {location['lon']:.4f}")
+    log(f"   Timezone: {location['timezone']}")
 
-        sun_times = await fetch_sun_times(location['lat'], location['lon'])
-        if sun_times:
-            sun_times_data = sun_times  # Store globally
-            log("")
-            log("🌅 Sun Times for Today (local time):")
-            log(f"   Astronomical Dawn: {sun_times['astronomical_dawn']}")
-            log(f"   Nautical Dawn:     {sun_times['nautical_dawn']}")
-            log(f"   Civil Dawn:        {sun_times['civil_dawn']}")
-            log(f"   Sunrise:           {sun_times['sunrise']}")
-            log(f"   Solar Noon:        {sun_times['solar_noon']}")
-            log(f"   Sunset:            {sun_times['sunset']}")
-            log(f"   Civil Dusk:        {sun_times['civil_dusk']}")
-            log(f"   Nautical Dusk:     {sun_times['nautical_dusk']}")
-            log(f"   Astronomical Dusk: {sun_times['astronomical_dusk']}")
-        else:
-            log("❌ Failed to fetch sun times")
+    sun_times = await fetch_sun_times(location['lat'], location['lon'])
+    if sun_times:
+        sun_times_data = sun_times  # Store globally
+        log("")
+        log("🌅 Sun Times for Today (local time):")
+        log(f"   Astronomical Dawn: {sun_times['astronomical_dawn']}")
+        log(f"   Sunrise:           {sun_times['sunrise']}")
+        log(f"   Solar Noon:        {sun_times['solar_noon']}")
+        log(f"   Sunset:            {sun_times['sunset']}")
+        log(f"   Astronomical Dusk: {sun_times['astronomical_dusk']}")
     else:
-        log("❌ Failed to fetch location")
+        log("❌ Failed to fetch sun times")
     log("")
     log("=" * 60)
 
