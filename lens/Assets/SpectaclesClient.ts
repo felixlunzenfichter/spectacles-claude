@@ -1,5 +1,5 @@
 @component
-export class NewScript extends BaseScriptComponent {
+export class SpectaclesClient extends BaseScriptComponent {
     @input
     textComponent: Text;
 
@@ -22,7 +22,7 @@ export class NewScript extends BaseScriptComponent {
     private lastPrintTime: number = 0;
     private printDelay: number = 1.0;  // Print status every 1 second
 
-    private readonly MAX_ROWS = 32;
+    private readonly MAX_ROWS = 50;
     private readonly CONTENT_WIDTH = 64;
     private readonly MAX_CONVERSATION_LINES = 200;
     private completeConversation: string[] = [];
@@ -53,24 +53,23 @@ export class NewScript extends BaseScriptComponent {
 
         let pixels = message.pixels;
 
-        if (message.compressed) {
-            const expanded = [];
-            for (let i = 0; i < pixels.length; i++) {
-                const pixel = pixels[i];
-                const x = pixel[0];
-                const y = pixel[1];
-                const r = pixel[2];
-                const g = pixel[3];
-                const b = pixel[4];
-                const count = pixel[5] || 1;
+        // RLE decompression (server always compresses)
+        const expanded = [];
+        for (let i = 0; i < pixels.length; i++) {
+            const pixel = pixels[i];
+            const x = pixel[0];
+            const y = pixel[1];
+            const r = pixel[2];
+            const g = pixel[3];
+            const b = pixel[4];
+            const count = pixel[5] || 1;
 
-                for (let j = 0; j < count; j++) {
-                    expanded.push([x + j, y, r, g, b]);
-                }
+            for (let j = 0; j < count; j++) {
+                expanded.push([x + j, y, r, g, b]);
             }
-            print(`Decompressed ${pixels.length} → ${expanded.length} pixels`);
-            pixels = expanded;
         }
+        print(`Decompressed ${pixels.length} → ${expanded.length} pixels`);
+        pixels = expanded;
 
         for (let i = 0; i < pixels.length; i++) {
             const [x, y, r, g, b] = pixels[i];
@@ -112,13 +111,54 @@ export class NewScript extends BaseScriptComponent {
                     messageText = event.data;
                 }
 
-                // Check if this is a screenshot JSON message
+                // Try to parse as JSON
                 try {
                     const message = JSON.parse(messageText);
 
                     // Only log non-packet messages to avoid spam
                     if (message.type !== "screenshot_packet") {
                         print("ServerTextDisplay: Received " + message.type);
+                    }
+
+                    if (message.type === "init") {
+                        print("ServerTextDisplay: Received init message");
+
+                        // Set dimensions
+                        this.screenshotWidth = message.width;
+                        this.screenshotHeight = message.height;
+
+                        // Set color
+                        const color = message.color;
+                        this.updateColor(color.r, color.g, color.b, color.a);
+
+                        // Create texture
+                        if (this.screenshotWidth > 0 && this.screenshotHeight > 0 && this.image) {
+                            print(`Creating texture: ${this.screenshotWidth}x${this.screenshotHeight}`);
+                            try {
+                                this.currentTexture = ProceduralTextureProvider.createWithFormat(
+                                    this.screenshotWidth,
+                                    this.screenshotHeight,
+                                    TextureFormat.RGBA8Unorm
+                                );
+                                this.currentProvider = this.currentTexture.control as ProceduralTextureProvider;
+                                this.pixelData = new Uint8Array(this.screenshotWidth * this.screenshotHeight * 4);
+                                this.image.mainPass.baseTex = this.currentTexture;
+                                print("Texture created");
+                            } catch (error) {
+                                print(`ERROR: ${error}`);
+                            }
+                        }
+
+                        // Display last message if present
+                        if (message.last_message) {
+                            this.updateText(message.last_message);
+                        }
+
+                        // Send acknowledgement
+                        print("ServerTextDisplay: Sending acknowledgement");
+                        this.socket.send("ACK");
+
+                        return;
                     }
 
                     if (message.type === "screenshot_packet") {
@@ -132,51 +172,7 @@ export class NewScript extends BaseScriptComponent {
                     }
                 }
 
-                // Check if this is a COLOR message
-                if (messageText.startsWith("COLOR:")) {
-                    const parts = messageText.split("|");
-                    const colorPart = parts[0].substring(6); // Remove "COLOR:"
-                    const rgba = colorPart.split(",");
-                    if (rgba.length === 4) {
-                        const r = parseFloat(rgba[0]);
-                        const g = parseFloat(rgba[1]);
-                        const b = parseFloat(rgba[2]);
-                        const a = parseFloat(rgba[3]);
-                        print("ServerTextDisplay: Setting color to " + r + "," + g + "," + b + "," + a);
-                        this.updateColor(r, g, b, a);
-                    }
-
-                    // Parse WIDTH and HEIGHT if present
-                    for (let i = 1; i < parts.length; i++) {
-                        if (parts[i].startsWith("WIDTH:")) {
-                            this.screenshotWidth = parseInt(parts[i].substring(6));
-                        } else if (parts[i].startsWith("HEIGHT:")) {
-                            this.screenshotHeight = parseInt(parts[i].substring(7));
-                        }
-                    }
-
-                    // Create texture if we have dimensions
-                    if (this.screenshotWidth > 0 && this.screenshotHeight > 0 && this.image) {
-                        print(`Creating texture: ${this.screenshotWidth}x${this.screenshotHeight}`);
-                        try {
-                            this.currentTexture = ProceduralTextureProvider.createWithFormat(
-                                this.screenshotWidth,
-                                this.screenshotHeight,
-                                TextureFormat.RGBA8Unorm
-                            );
-                            this.currentProvider = this.currentTexture.control as ProceduralTextureProvider;
-                            this.pixelData = new Uint8Array(this.screenshotWidth * this.screenshotHeight * 4);
-                            this.image.mainPass.baseTex = this.currentTexture;
-                            print("Texture created");
-                        } catch (error) {
-                            print(`ERROR: ${error}`);
-                        }
-                    }
-
-                    // Don't display COLOR messages as text
-                    return;
-                }
-
+                // Display as text
                 this.updateText(messageText);
             };
 
