@@ -59,34 +59,6 @@ def compress_pixels_rle(pixels):
 
     return compressed
 
-def generate_screenshot_packets(screenshot, pixels_per_packet=100000):
-    """Generator that yields screenshot packets."""
-    width, height = screenshot.size
-    screenshot = screenshot.convert('RGB')
-    pixels = screenshot.load()
-
-    pixel_buffer = []
-
-    for y in range(height):
-        for x in range(width):
-            r, g, b = pixels[x, y]
-            pixel_buffer.append([x, height - 1 - y, r, g, b])
-
-            if len(pixel_buffer) >= pixels_per_packet:
-                packet = {
-                    'type': 'screenshot_packet',
-                    'pixels': pixel_buffer
-                }
-                yield packet
-                pixel_buffer = []
-
-    if pixel_buffer:
-        packet = {
-            'type': 'screenshot_packet',
-            'pixels': pixel_buffer
-        }
-        yield packet
-
 def generate_delta_packets(prev_screenshot, new_screenshot, pixels_per_packet=100000):
     """Generator that yields only changed pixels."""
     width, height = new_screenshot.size
