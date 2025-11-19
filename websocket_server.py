@@ -172,8 +172,8 @@ def get_sun_phase_color(sun_times):
         # Morning: blue (100% blue)
         return ((0.0, 0.0, 1.0, 1.0), "morning")
     elif solar_noon <= now < sunset:
-        # Afternoon: 50% blue (light blue)
-        return ((0.0, 0.0, 0.5, 1.0), "afternoon")
+        # Afternoon: turquoise (100% blue + 100% green)
+        return ((0.0, 1.0, 1.0, 1.0), "afternoon")
     elif sunset <= now < astronomical_dusk:
         # Dusk: orange (100% red + 50% green)
         return ((1.0, 0.5, 0.0, 1.0), "dusk")
