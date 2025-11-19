@@ -16,8 +16,8 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from PIL import ImageGrab
 
-# Store connected clients
-connected_clients = set()
+# Store THE client (only one allowed)
+current_client = None
 
 # Store last sent message to avoid duplicates
 last_sent_message = None
@@ -285,23 +285,22 @@ async def broadcast_message(message):
     log("=" * 60)
     log(message)
     log("=" * 60)
+    global current_client
+
     log(f"   Message length: {len(message)} characters")
-    log(f"   Sending to {len(connected_clients)} client(s)")
 
-    # Send to all connected clients
-    if connected_clients:
-        disconnected_clients = set()
-        for client in connected_clients:
-            try:
-                await client.send(message)
-                log(f"   ✅ Sent to {client.remote_address}")
-            except Exception as e:
-                log(f"   ❌ Failed to send to {client.remote_address}: {e}")
-                disconnected_clients.add(client)
-
-        # Remove disconnected clients
-        for client in disconnected_clients:
-            connected_clients.discard(client)
+    # Send to THE client if connected
+    if current_client:
+        try:
+            await current_client.send(message)
+            log(f"   ✅ Sent to {current_client.remote_address}")
+        except Exception as e:
+            log(f"   ❌ Failed to send to client: {e}")
+            # Clear the client if sending failed
+            current_client = None
+            log(f"   Client cleared due to send failure")
+    else:
+        log(f"   ⚠️  No client connected - message not sent")
 
 async def continuous_delta_updates(websocket, prev_screenshot):
     """Recursively capture and send delta updates."""
@@ -315,13 +314,33 @@ async def continuous_delta_updates(websocket, prev_screenshot):
 
 async def handle_client(websocket):
     """Handle a client connection."""
-    global sun_times_data, location_data
+    global sun_times_data, location_data, current_client
 
-    # Add client to set
-    connected_clients.add(websocket)
     client_addr = websocket.remote_address
+    client_ip = client_addr[0] if client_addr else "unknown"
+
+    # HARDCODED: Only accept connections from Spectacles
+    SPECTACLES_IP = "172.20.10.9"
+
+    # Check if this is the Spectacles
+    if client_ip != SPECTACLES_IP:
+        log(f"❌ REJECTED CONNECTION from {client_addr} - Not Spectacles IP")
+        log(f"   Expected: {SPECTACLES_IP}, Got: {client_ip}")
+        await websocket.close()
+        return
+
+    # Replace any existing client with this new one
+    if current_client:
+        log(f"⚠️  Replacing existing client with new connection from {client_addr}")
+        try:
+            await current_client.close()
+        except:
+            pass
+
+    # Set this as THE client
+    current_client = websocket
     log(f"✅ CLIENT CONNECTED: {client_addr}")
-    log(f"   Total clients: {len(connected_clients)}")
+    log(f"   This is THE client - all data will be sent here")
 
     try:
         # Get native screen dimensions
@@ -370,9 +389,10 @@ async def handle_client(websocket):
         log(f"❌ ERROR with {client_addr}: {e}")
         log(f"   Traceback: {traceback.format_exc()}")
     finally:
-        # Remove client from set
-        connected_clients.discard(websocket)
-        log(f"   Remaining clients: {len(connected_clients)}")
+        # Clear the client if it's this one
+        if current_client == websocket:
+            current_client = None
+            log(f"   Client disconnected - slot now empty")
 
 async def main():
     """Start the WebSocket server and file watcher."""
@@ -442,7 +462,10 @@ async def main():
         log(f"👁️  File watcher started successfully")
 
     log("=" * 60)
-    log("⏳ Waiting for connections...")
+    log("⏳ Waiting for Spectacles connection...")
+    log("   📱 Only accepting connections from: 172.20.10.9")
+    log("   🚫 Blocking all other connections (Lens Studio, localhost, etc.)")
+    log("   ⚠️  Only one client allowed at a time")
     log("")
 
     try:
