@@ -26,86 +26,38 @@ last_sent_message = None
 sun_times_data = None
 location_data = None
 
-# Screen dimensions - set during client connection
-screen_width = None
-screen_height = None
-
-# Constants for compression
-RECTANGLES_PER_PACKET = 100000
-
 def log(message):
     """Print a timestamped log message."""
     timestamp = datetime.datetime.now().strftime('%H:%M:%S')
     print(f"[{timestamp}] {message}")
 
 
-def merge_pixels_to_rectangles(changed_pixels):
-    """
-    Convert changed pixels into minimum number of rectangles.
-    Greedy approach: maximize X first, then Y.
-    """
-    rectangles = []
-    visited = set()
+def compress_pixels_rle(pixels):
+    if not pixels:
+        return []
 
-    # Process all pixels - but use the flipped Y coordinates that we stored!
-    for y in range(screen_height):
-        for x in range(screen_width):
-            # We stored pixels with flipped Y, so use that
-            flipped_y = screen_height - 1 - y
-            if (x, flipped_y) in changed_pixels and (x, flipped_y) not in visited:
-                color = changed_pixels[(x, flipped_y)]
+    compressed = []
+    i = 0
 
-                # Grow rectangle: X first, then Y (using flipped coordinates)
-                rect = grow_rectangle_greedy(changed_pixels, x, flipped_y, color, visited)
-                rectangles.append(rect)
+    while i < len(pixels):
+        x, y, r, g, b = pixels[i]
+        count = 1
 
-    return rectangles
+        while i + count < len(pixels):
+            next_pixel = pixels[i + count]
+            next_x, next_y, next_r, next_g, next_b = next_pixel
 
-
-def grow_rectangle_greedy(changed_pixels, start_x, start_y, color, visited):
-    """
-    Grow rectangle greedily: expand X as far as possible, then Y.
-    """
-    # Step 1: Expand X (go right as far as possible)
-    max_x = start_x
-    while (max_x + 1, start_y) in changed_pixels and \
-          changed_pixels[(max_x + 1, start_y)] == color and \
-          (max_x + 1, start_y) not in visited:
-        max_x += 1
-
-    # Step 2: Expand Y (go down as far as possible with the full width)
-    max_y = start_y
-    can_expand = True
-
-    while can_expand:
-        test_y = max_y + 1
-
-        # Check if entire next row has the same color
-        for test_x in range(start_x, max_x + 1):
-            if (test_x, test_y) not in changed_pixels or \
-               changed_pixels[(test_x, test_y)] != color or \
-               (test_x, test_y) in visited:
-                can_expand = False
+            if (next_y == y and
+                next_x == x + count and
+                next_r == r and next_g == g and next_b == b):
+                count += 1
+            else:
                 break
 
-        if can_expand:
-            max_y = test_y
+        compressed.append([x, y, r, g, b, count])
+        i += count
 
-    # Step 3: Mark all pixels in rectangle as visited
-    for y in range(start_y, max_y + 1):
-        for x in range(start_x, max_x + 1):
-            visited.add((x, y))
-
-    # Step 4: Return the rectangle with compact format
-    return {
-        'x': start_x,
-        'y': start_y,
-        'w': max_x - start_x + 1,
-        'h': max_y - start_y + 1,
-        'r': color[0],
-        'g': color[1],
-        'b': color[2]
-    }
+    return compressed
 
 def generate_screenshot_packets(screenshot, pixels_per_packet=100000):
     """Generator that yields screenshot packets."""
@@ -135,44 +87,38 @@ def generate_screenshot_packets(screenshot, pixels_per_packet=100000):
         }
         yield packet
 
-def generate_delta_packets(prev_screenshot, new_screenshot):
-    """Generator that yields only changed pixels as rectangles."""
+def generate_delta_packets(prev_screenshot, new_screenshot, pixels_per_packet=100000):
+    """Generator that yields only changed pixels."""
+    width, height = new_screenshot.size
     prev_screenshot = prev_screenshot.convert('RGB')
     new_screenshot = new_screenshot.convert('RGB')
     prev_pixels = prev_screenshot.load()
     new_pixels = new_screenshot.load()
 
-    # Step 1: Find all changed pixels
-    changed_pixels = {}
+    pixel_buffer = []
 
-    for y in range(screen_height):
-        for x in range(screen_width):
+    for y in range(height):
+        for x in range(width):
             prev_r, prev_g, prev_b = prev_pixels[x, y]
             new_r, new_g, new_b = new_pixels[x, y]
 
             if prev_r != new_r or prev_g != new_g or prev_b != new_b:
-                # Note: we flip y coordinate here as before
-                changed_pixels[(x, screen_height - 1 - y)] = (new_r, new_g, new_b)
+                pixel_buffer.append([x, height - 1 - y, new_r, new_g, new_b])
 
-    # If no changes, don't send anything
-    if not changed_pixels:
-        return
+                if len(pixel_buffer) >= pixels_per_packet:
+                    compressed = compress_pixels_rle(pixel_buffer)
+                    packet = {
+                        'type': 'screenshot_packet',
+                        'pixels': compressed
+                    }
+                    yield packet
+                    pixel_buffer = []
 
-    # Step 2: Convert changed pixels into rectangles
-    rectangles = merge_pixels_to_rectangles(changed_pixels)
-
-    # Log compression stats
-    log(f"📊 Compression: {len(changed_pixels)} pixels → {len(rectangles)} rectangles")
-    if rectangles:
-        compression_ratio = len(changed_pixels) / len(rectangles)
-        log(f"   Average rectangle size: {compression_ratio:.1f} pixels")
-
-    # Step 3: Send rectangles in batches using slicing
-    for i in range(0, len(rectangles), RECTANGLES_PER_PACKET):
-        batch = rectangles[i:i + RECTANGLES_PER_PACKET]
+    if pixel_buffer:
+        compressed = compress_pixels_rle(pixel_buffer)
         packet = {
-            'type': 'rectangle_packet',
-            'rectangles': batch
+            'type': 'screenshot_packet',
+            'pixels': compressed
         }
         yield packet
 
@@ -368,7 +314,7 @@ async def continuous_delta_updates(websocket, prev_screenshot):
 
 async def handle_client(websocket):
     """Handle a client connection."""
-    global sun_times_data, location_data, current_client, screen_width, screen_height
+    global sun_times_data, location_data, current_client
 
     client_addr = websocket.remote_address
     client_ip = client_addr[0] if client_addr else "unknown"
@@ -399,8 +345,8 @@ async def handle_client(websocket):
     try:
         # Get native screen dimensions
         screenshot = ImageGrab.grab()
-        screen_width, screen_height = screenshot.size
-        log(f"📸 Native screen dimensions: {screen_width}x{screen_height}")
+        width, height = screenshot.size
+        log(f"📸 Native screen dimensions: {width}x{height}")
 
         # Get color and phase based on sun position
         color, phase = get_sun_phase_color(sun_times_data) if sun_times_data else ((1.0, 0.0, 0.0, 1.0), "night")
@@ -408,8 +354,8 @@ async def handle_client(websocket):
         # Create single initialization message
         init_message = {
             'type': 'init',
-            'width': screen_width,
-            'height': screen_height,
+            'width': width,
+            'height': height,
             'color': {
                 'r': color[0],
                 'g': color[1],
@@ -419,7 +365,7 @@ async def handle_client(websocket):
             'last_message': last_sent_message if last_sent_message else None
         }
 
-        log(f"📤 Sending init to {client_addr}: {phase} - {color} - {screen_width}x{screen_height}")
+        log(f"📤 Sending init to {client_addr}: {phase} - {color} - {width}x{height}")
         await websocket.send(json.dumps(init_message))
         log(f"✅ Init message sent successfully")
 
@@ -430,7 +376,7 @@ async def handle_client(websocket):
 
         # Start with black screen (no initial full screenshot)
         from PIL import Image
-        prev_screenshot = Image.new('RGB', (screen_width, screen_height), (0, 0, 0))
+        prev_screenshot = Image.new('RGB', (width, height), (0, 0, 0))
 
         # Start recursive delta updates
         log(f"🔄 Starting recursive delta updates")

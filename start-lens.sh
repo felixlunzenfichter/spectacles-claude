@@ -6,6 +6,14 @@ PROJECT_PATH="$SCRIPT_DIR/lens/lens.esproj"
 
 echo "Starting Lens Studio..."
 echo "================================"
+
+# Quit Lens Studio first if it's running
+echo "Quitting any existing Lens Studio instance..."
+osascript -e 'tell application "Lens Studio" to quit' 2>/dev/null || true
+
+# Wait a moment for Lens Studio to fully quit
+sleep 1
+
 echo "Opening project: $PROJECT_PATH"
 echo ""
 

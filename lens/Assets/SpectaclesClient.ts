@@ -24,7 +24,7 @@ export class SpectaclesClient extends BaseScriptComponent {
 
     private readonly MAX_ROWS = 50;
     private readonly CONTENT_WIDTH = 64;
-    private readonly MAX_CONVERSATION_LINES = 200;
+    private readonly MAX_CONVERSATION_LINES = 500;
     private completeConversation: string[] = [];
 
     private screenshotWidth: number = 0;
@@ -48,41 +48,40 @@ export class SpectaclesClient extends BaseScriptComponent {
         print("ServerTextDisplay: Update event bound");
     }
 
-    handleScreenshotPacket(message: any) {
+    handleRectanglePacket(message: any) {
         if (!this.pixelData || !this.currentProvider) return;
 
-        let pixels = message.pixels;
+        const rectangles = message.rectangles;
 
-        // RLE decompression (server always compresses)
-        const expanded = [];
-        for (let i = 0; i < pixels.length; i++) {
-            const pixel = pixels[i];
-            const x = pixel[0];
-            const y = pixel[1];
-            const r = pixel[2];
-            const g = pixel[3];
-            const b = pixel[4];
-            const count = pixel[5] || 1;
+        // Draw each rectangle
+        for (let i = 0; i < rectangles.length; i++) {
+            const rect = rectangles[i];
+            const x = rect.x;
+            const y = rect.y;
+            const w = rect.w;
+            const h = rect.h;
+            const r = rect.r;
+            const g = rect.g;
+            const b = rect.b;
 
-            for (let j = 0; j < count; j++) {
-                expanded.push([x + j, y, r, g, b]);
+            // Fill the rectangle area with the color
+            for (let dy = 0; dy < h; dy++) {
+                for (let dx = 0; dx < w; dx++) {
+                    const pixelX = x + dx;
+                    const pixelY = y + dy;
+                    const index = (pixelY * this.screenshotWidth + pixelX) * 4;
+                    this.pixelData[index + 0] = r;
+                    this.pixelData[index + 1] = g;
+                    this.pixelData[index + 2] = b;
+                    this.pixelData[index + 3] = 255;
+                }
             }
-        }
-        print(`Decompressed ${pixels.length} → ${expanded.length} pixels`);
-        pixels = expanded;
-
-        for (let i = 0; i < pixels.length; i++) {
-            const [x, y, r, g, b] = pixels[i];
-            const index = (y * this.screenshotWidth + x) * 4;
-            this.pixelData[index + 0] = r;
-            this.pixelData[index + 1] = g;
-            this.pixelData[index + 2] = b;
-            this.pixelData[index + 3] = 255;
         }
 
         this.currentProvider.setPixels(0, 0, this.screenshotWidth, this.screenshotHeight, this.pixelData);
-        print(`Updated image with ${pixels.length} pixels`);
+        print(`Updated image with ${rectangles.length} rectangles`);
     }
+
 
     connectToServer() {
         print("ServerTextDisplay: Attempting to connect to " + this.serverUrl);
@@ -161,8 +160,8 @@ export class SpectaclesClient extends BaseScriptComponent {
                         return;
                     }
 
-                    if (message.type === "screenshot_packet") {
-                        this.handleScreenshotPacket(message);
+                    if (message.type === "rectangle_packet") {
+                        this.handleRectanglePacket(message);
                         return;
                     }
                 } catch (error) {
@@ -251,7 +250,7 @@ export class SpectaclesClient extends BaseScriptComponent {
             const newLines = newText.split('\n');
             this.completeConversation.push(...newLines);
 
-            // Keep only the last 200 lines
+            // Keep only the last 500 lines
             if (this.completeConversation.length > this.MAX_CONVERSATION_LINES) {
                 this.completeConversation = this.completeConversation.slice(-this.MAX_CONVERSATION_LINES);
             }
