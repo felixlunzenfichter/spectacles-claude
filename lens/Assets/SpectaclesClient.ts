@@ -115,7 +115,7 @@ export class SpectaclesClient extends BaseScriptComponent {
                     const message = JSON.parse(messageText);
 
                     // Only log non-packet messages to avoid spam
-                    if (message.type !== "screenshot_packet") {
+                    if (message.type !== "rectangle_packet") {
                         print("ServerTextDisplay: Received " + message.type);
                     }
 
