@@ -68,7 +68,8 @@ export class SpectaclesClient extends BaseScriptComponent {
             for (let dy = 0; dy < h; dy++) {
                 for (let dx = 0; dx < w; dx++) {
                     const pixelX = x + dx;
-                    const pixelY = y + dy;
+                    // Flip Y coordinate to fix upside-down display
+                    const pixelY = (this.screenshotHeight - 1) - (y + dy);
                     const index = (pixelY * this.screenshotWidth + pixelX) * 4;
                     this.pixelData[index + 0] = r;
                     this.pixelData[index + 1] = g;
