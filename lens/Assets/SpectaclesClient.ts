@@ -9,16 +9,13 @@ export class SpectaclesClient extends BaseScriptComponent {
     @input
     serverUrl: string = "ws://172.20.10.3:8080";  // Mac server IP address
 
-    @input
-    autoConnect: boolean = true;
-
     private startTime: number;
     private socket: WebSocket = null;
     private connected: boolean = false;
     private internetModule: any;
     private rawText: string = "";  // Store raw unformatted text
     private lastReconnectAttempt: number = 0;
-    private reconnectDelay: number = 10.0;  // Try reconnecting every 10 seconds
+    private reconnectDelay: number = 3.0;  // Try reconnecting every 3 seconds
     private lastPrintTime: number = 0;
     private printDelay: number = 1.0;  // Print status every 1 second
 
@@ -40,12 +37,15 @@ export class SpectaclesClient extends BaseScriptComponent {
         // Load the InternetModule for WebSocket support
         this.internetModule = require("LensStudio:InternetModule");
 
-        if (this.autoConnect) {
-            this.connectToServer();
-        }
+        // Set lastReconnectAttempt to current time minus 2 seconds
+        // This will trigger connection attempt after 1 second (since reconnectDelay is 3)
+        this.lastReconnectAttempt = getTime() - 2.0;
 
         this.createEvent("UpdateEvent").bind(this.onUpdate.bind(this));
         print("ServerTextDisplay: Update event bound");
+
+        // Update text to show initialized state
+        this.updateText("Initialized");
     }
 
     handleRectanglePacket(message: any) {

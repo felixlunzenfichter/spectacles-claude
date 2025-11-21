@@ -26,7 +26,6 @@
   ExportUid: 00000000-0000-0000-0000-000000000000
   PackagePolicy: CanBeUnpacked
   ScriptInputsHidden:
-    autoConnect: false
     image: false
     serverUrl: false
     textComponent: false
@@ -42,7 +41,6 @@
     - textComponent: !<reference.Text> 00000000-0000-0000-0000-000000000000
       image: !<reference.Image> 00000000-0000-0000-0000-000000000000
       serverUrl: "ws://172.20.10.3:8080"
-      autoConnect: true
   ScriptTypes:
     -
       {}
@@ -50,4 +48,3 @@
     - // @input Component.Text textComponent
     - // @input Component.Image image
     - '// @input string serverUrl = "ws://172.20.10.3:8080"'
-    - // @input bool autoConnect = true

@@ -164,7 +164,6 @@
   ScriptAsset: !<reference> d59126a5-1704-4258-bee1-0bd5863fdc9e
   ScriptInputsDefault:
     serverUrl: true
-    autoConnect: true
   ScriptTypesDefault:
     {}
   ScriptInputs:
@@ -172,7 +171,6 @@
       textComponent: !<reference.Text> 012bc09d-c49f-4216-9831-7d5549ad4917
       image: !<reference.Image> c3216d35-9779-4704-bfbd-0adf4c30a8bc
       serverUrl: "ws://172.20.10.3:8080"
-      autoConnect: true
   ScriptTypes:
     "":
       {}
@@ -225,11 +223,10 @@
   PrefabRemaps:
     []
   Name: SpectaclesClient
-  Enabled: true
+  Enabled: false
   ScriptAsset: !<reference> d59126a5-1704-4258-bee1-0bd5863fdc9e
   ScriptInputsDefault:
     serverUrl: true
-    autoConnect: true
   ScriptTypesDefault:
     {}
   ScriptInputs:
@@ -237,7 +234,6 @@
       textComponent: !<reference.Text> 012bc09d-c49f-4216-9831-7d5549ad4917
       image: !<reference.Image> c3216d35-9779-4704-bfbd-0adf4c30a8bc
       serverUrl: "ws://172.20.10.3:8080"
-      autoConnect: true
   ScriptTypes:
     "":
       {}

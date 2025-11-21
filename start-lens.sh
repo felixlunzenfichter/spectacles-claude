@@ -166,6 +166,33 @@ tell application "System Events"
                                             end if
                                         end repeat
                                         if continueLoop then exit repeat
+
+                                    else if textContent contains "A new version of Lens Studio is available" then
+                                        log "Found 'Lens Studio Update' dialog at window " & w
+
+                                        -- Bring window to foreground
+                                        tell window w
+                                            perform action "AXRaise"
+                                        end tell
+                                        delay 0.5
+
+                                        log "  Looking for Skip button..."
+                                        -- Find and click Skip using entire contents
+                                        set allElements to entire contents of window w
+                                        repeat with elem in allElements
+                                            if class of elem is button then
+                                                try
+                                                    if name of elem is "Skip" then
+                                                        click elem
+                                                        log "  Clicked Skip to dismiss update dialog"
+                                                        delay 1  -- Wait 1 second after clicking
+                                                        set continueLoop to true
+                                                        exit repeat
+                                                    end if
+                                                end try
+                                            end if
+                                        end repeat
+                                        if continueLoop then exit repeat
                                     end if
                                 end try
                             end repeat

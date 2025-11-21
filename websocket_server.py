@@ -10,11 +10,12 @@ import datetime
 import traceback
 import json
 import os
+import time
 import aiohttp
 from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-from PIL import ImageGrab
+from PIL import ImageGrab, Image
 
 # Store THE client (only one allowed)
 current_client = None
@@ -31,7 +32,7 @@ screen_width = None
 screen_height = None
 
 # Constants for compression
-RECTANGLES_PER_PACKET = 100000
+RECTANGLES_PER_PACKET = 100000  # 100,000 rectangles per packet
 
 def log(message):
     """Print a timestamped log message."""
@@ -47,16 +48,15 @@ def merge_pixels_to_rectangles(changed_pixels):
     rectangles = []
     visited = set()
 
-    # Process all pixels - but use the flipped Y coordinates that we stored!
+    # Process pixels in normal screen order (top to bottom)
     for y in range(screen_height):
         for x in range(screen_width):
-            # We stored pixels with flipped Y, so use that
-            flipped_y = screen_height - 1 - y
-            if (x, flipped_y) in changed_pixels and (x, flipped_y) not in visited:
-                color = changed_pixels[(x, flipped_y)]
+            # Direct lookup - no additional flipping needed
+            if (x, y) in changed_pixels and (x, y) not in visited:
+                color = changed_pixels[(x, y)]
 
-                # Grow rectangle: X first, then Y (using flipped coordinates)
-                rect = grow_rectangle_greedy(changed_pixels, x, flipped_y, color, visited)
+                # Grow rectangle: X first, then Y
+                rect = grow_rectangle_greedy(changed_pixels, x, y, color, visited)
                 rectangles.append(rect)
 
     return rectangles
@@ -135,6 +135,11 @@ def generate_screenshot_packets(screenshot, pixels_per_packet=100000):
         }
         yield packet
 
+def quantize_color(color, levels=16):
+    """Quantize color to reduce precision and improve compression."""
+    step = 256 // levels
+    return tuple((c // step) * step + step // 2 for c in color)
+
 def generate_delta_packets(prev_screenshot, new_screenshot):
     """Generator that yields only changed pixels as rectangles."""
     prev_screenshot = prev_screenshot.convert('RGB')
@@ -142,7 +147,7 @@ def generate_delta_packets(prev_screenshot, new_screenshot):
     prev_pixels = prev_screenshot.load()
     new_pixels = new_screenshot.load()
 
-    # Step 1: Find all changed pixels
+    # Step 1: Find all changed pixels (with color quantization)
     changed_pixels = {}
 
     for y in range(screen_height):
@@ -151,8 +156,10 @@ def generate_delta_packets(prev_screenshot, new_screenshot):
             new_r, new_g, new_b = new_pixels[x, y]
 
             if prev_r != new_r or prev_g != new_g or prev_b != new_b:
-                # Note: we flip y coordinate here as before
-                changed_pixels[(x, screen_height - 1 - y)] = (new_r, new_g, new_b)
+                # Quantize the color to reduce variations
+                quantized_color = quantize_color((new_r, new_g, new_b))
+                # No Y-flipping - use normal coordinates
+                changed_pixels[(x, y)] = quantized_color
 
     # If no changes, don't send anything
     if not changed_pixels:
@@ -168,13 +175,32 @@ def generate_delta_packets(prev_screenshot, new_screenshot):
         log(f"   Average rectangle size: {compression_ratio:.1f} pixels")
 
     # Step 3: Send rectangles in batches using slicing
+    total_json_size = 0
+    total_binary_size = 0
+
     for i in range(0, len(rectangles), RECTANGLES_PER_PACKET):
         batch = rectangles[i:i + RECTANGLES_PER_PACKET]
         packet = {
             'type': 'rectangle_packet',
             'rectangles': batch
         }
+
+        # Calculate sizes for comparison
+        json_size = len(json.dumps(packet))
+        # Binary would be: 11 bytes per rectangle + small header
+        binary_size = len(batch) * 11 + 8
+
+        total_json_size += json_size
+        total_binary_size += binary_size
+
+        log(f"📦 Packet: {len(batch)} rectangles, JSON: {json_size:,} bytes, Binary would be: {binary_size:,} bytes")
+        log(f"   Reduction: {json_size/binary_size:.1f}x smaller with binary")
+
         yield packet
+
+    if total_json_size > 0:
+        log(f"📊 Total: JSON: {total_json_size:,} bytes, Binary: {total_binary_size:,} bytes")
+        log(f"   Overall reduction: {total_json_size/total_binary_size:.1f}x with binary")
 
 
 async def fetch_sun_times(lat, lon):
@@ -359,10 +385,26 @@ async def broadcast_message(message):
 async def continuous_delta_updates(websocket, prev_screenshot):
     """Recursively capture and send delta updates."""
     new_screenshot = ImageGrab.grab()
+    # Resize to 1920x1080 for consistent quality
+    new_screenshot = new_screenshot.resize((1920, 1080), Image.LANCZOS)
+
+    total_bytes = 0
+    packets_sent = 0
+    start_time = time.time()
 
     for packet in generate_delta_packets(prev_screenshot, new_screenshot):
         packet_json = json.dumps(packet)
+        packet_size = len(packet_json)
+        total_bytes += packet_size
+        packets_sent += 1
+
+        log(f"📤 Sending packet {packets_sent}: {packet_size:,} bytes ({len(packet['rectangles'])} rectangles)")
         await websocket.send(packet_json)
+
+    if packets_sent > 0:
+        elapsed = time.time() - start_time
+        log(f"📊 Frame summary: {packets_sent} packets, {total_bytes:,} bytes total, {elapsed*1000:.1f}ms")
+        log(f"   Data rate: {total_bytes/1024:.1f} KB/frame")
 
     await continuous_delta_updates(websocket, new_screenshot)
 
@@ -397,10 +439,9 @@ async def handle_client(websocket):
     log(f"   This is THE client - all data will be sent here")
 
     try:
-        # Get native screen dimensions
-        screenshot = ImageGrab.grab()
-        screen_width, screen_height = screenshot.size
-        log(f"📸 Native screen dimensions: {screen_width}x{screen_height}")
+        # Set fixed dimensions for consistency
+        screen_width, screen_height = 1920, 1080
+        log(f"📸 Fixed screen dimensions: {screen_width}x{screen_height}")
 
         # Get color and phase based on sun position
         color, phase = get_sun_phase_color(sun_times_data) if sun_times_data else ((1.0, 0.0, 0.0, 1.0), "night")
@@ -429,7 +470,6 @@ async def handle_client(websocket):
         log(f"✅ Received acknowledgement: {ack}")
 
         # Start with black screen (no initial full screenshot)
-        from PIL import Image
         prev_screenshot = Image.new('RGB', (screen_width, screen_height), (0, 0, 0))
 
         # Start recursive delta updates
