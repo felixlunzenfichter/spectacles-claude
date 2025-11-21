@@ -84,6 +84,132 @@ export class SpectaclesClient extends BaseScriptComponent {
     }
 
 
+    decodeBase64(base64: string): number[] {
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+        const bytes = [];
+
+        let i = 0;
+        while (i < base64.length) {
+            // Skip whitespace
+            if (base64[i] === ' ' || base64[i] === '\n' || base64[i] === '\r' || base64[i] === '\t') {
+                i++;
+                continue;
+            }
+
+            // Get 4 base64 chars (encoding 3 bytes)
+            const encoded1 = chars.indexOf(base64[i++]);
+            const encoded2 = chars.indexOf(base64[i++]);
+            const encoded3 = base64[i] === '=' ? -1 : chars.indexOf(base64[i++]);
+            const encoded4 = base64[i] === '=' ? -1 : chars.indexOf(base64[i++]);
+
+            if (encoded1 === -1 || encoded2 === -1) break;
+
+            bytes.push((encoded1 << 2) | (encoded2 >> 4));
+
+            if (encoded3 !== -1) {
+                bytes.push(((encoded2 & 15) << 4) | (encoded3 >> 2));
+
+                if (encoded4 !== -1) {
+                    bytes.push(((encoded3 & 3) << 6) | encoded4);
+                }
+            }
+        }
+
+        return bytes;
+    }
+
+    processJSONMessage(message: any) {
+        // Handle message based on type
+        switch (message.type) {
+            case "init":
+                print("ServerTextDisplay: Received init message");
+
+                // Set dimensions
+                this.screenshotWidth = message.width;
+                this.screenshotHeight = message.height;
+
+                // Set color
+                const color = message.color;
+                this.updateColor(color.r, color.g, color.b, color.a);
+
+                // Create texture
+                if (this.screenshotWidth > 0 && this.screenshotHeight > 0 && this.image) {
+                    print(`Creating texture: ${this.screenshotWidth}x${this.screenshotHeight}`);
+                    try {
+                        this.currentTexture = ProceduralTextureProvider.createWithFormat(
+                            this.screenshotWidth,
+                            this.screenshotHeight,
+                            TextureFormat.RGBA8Unorm
+                        );
+                        this.currentProvider = this.currentTexture.control as ProceduralTextureProvider;
+                        this.pixelData = new Uint8Array(this.screenshotWidth * this.screenshotHeight * 4);
+                        this.image.mainPass.baseTex = this.currentTexture;
+                        print("Texture created");
+                    } catch (error) {
+                        print(`ERROR: ${error}`);
+                    }
+                }
+
+                // Display last message if present
+                if (message.last_message) {
+                    this.updateText(message.last_message);
+                }
+
+                // Send acknowledgement
+                print("ServerTextDisplay: Sending acknowledgement");
+                this.socket.send("ACK");
+                break;
+
+            case "rectangle_packet":
+                // Don't log rectangle packets to avoid spam
+                this.handleRectanglePacket(message);
+                break;
+
+            case "text":
+                print("ServerTextDisplay: Received text message");
+                // Display the text data
+                this.updateText(message.data);
+                break;
+
+            case "binary_rectangles":
+                print(`ServerTextDisplay: Received base64 rectangles packet with ${message.count} rectangles`);
+                // Decode Base64 to binary using custom decoder
+                const bytes = this.decodeBase64(message.data);
+                print(`ServerTextDisplay: Decoded ${bytes.length} bytes from base64`);
+
+                // Parse binary data
+                if (bytes.length >= 5 && bytes[0] === 0x02) {
+                    const rectCount = bytes[1] | (bytes[2] << 8) | (bytes[3] << 16) | (bytes[4] << 24);
+                    const rectangles = [];
+
+                    let offset = 5;
+                    for (let i = 0; i < rectCount && offset + 9 < bytes.length; i++) {
+                        const x = bytes[offset] | (bytes[offset + 1] << 8); offset += 2;
+                        const y = bytes[offset] | (bytes[offset + 1] << 8); offset += 2;
+                        const w = bytes[offset] | (bytes[offset + 1] << 8); offset += 2;
+                        const h = bytes[offset] | (bytes[offset + 1] << 8); offset += 2;
+
+                        const byte1 = bytes[offset++];
+                        const byte2 = bytes[offset++];
+
+                        const r = ((byte1 >> 4) & 0x0F) * 16 + 8;
+                        const g = (byte1 & 0x0F) * 16 + 8;
+                        const b = ((byte2 >> 4) & 0x0F) * 16 + 8;
+
+                        rectangles.push({ x, y, w, h, r, g, b });
+                    }
+
+                    print(`ServerTextDisplay: Decoded ${rectangles.length} rectangles from base64`);
+                    this.handleRectanglePacket({ rectangles });
+                }
+                break;
+
+            default:
+                print("ServerTextDisplay: Unknown message type: " + message.type);
+                break;
+        }
+    }
+
     connectToServer() {
         print("ServerTextDisplay: Attempting to connect to " + this.serverUrl);
 
@@ -99,80 +225,83 @@ export class SpectaclesClient extends BaseScriptComponent {
             };
 
             this.socket.onmessage = async (event) => {
-                // Handle both text and binary messages
-                let messageText: string;
+                // Check if it's a binary message
                 if (event.data instanceof Blob) {
-                    // Binary message - convert to text
-                    messageText = await event.data.text();
+                    // Try to read as text first to check the type
+                    const messageText = await event.data.text();
+
+                    // Check if it's a binary rectangle packet
+                    if (messageText.charCodeAt(0) === 0x02) {
+                        print("ServerTextDisplay: Detected binary packet!");
+                        // Parse binary data from the text string
+                        // Each character in JavaScript string is 16-bit, but we need 8-bit bytes
+                        const bytes = [];
+                        for (let i = 0; i < messageText.length; i++) {
+                            const code = messageText.charCodeAt(i);
+                            // Handle potential multi-byte characters
+                            if (code < 256) {
+                                bytes.push(code);
+                            } else {
+                                // Split into two bytes for characters > 255
+                                bytes.push(code & 0xFF);
+                                bytes.push((code >> 8) & 0xFF);
+                            }
+                        }
+
+                        print(`ServerTextDisplay: Binary packet has ${bytes.length} bytes`);
+
+                        // Now parse the binary data
+                        if (bytes.length >= 5 && bytes[0] === 0x02) {
+                            // Read rectangle count (little-endian uint32 at bytes 1-4)
+                            const rectCount = bytes[1] | (bytes[2] << 8) | (bytes[3] << 16) | (bytes[4] << 24);
+                            print(`ServerTextDisplay: Binary packet contains ${rectCount} rectangles`);
+                            const rectangles = [];
+
+                            let offset = 5; // Start after header
+                            for (let i = 0; i < rectCount && offset + 9 < bytes.length; i++) {
+                                // Read position and dimensions (little-endian uint16)
+                                const x = bytes[offset] | (bytes[offset + 1] << 8); offset += 2;
+                                const y = bytes[offset] | (bytes[offset + 1] << 8); offset += 2;
+                                const w = bytes[offset] | (bytes[offset + 1] << 8); offset += 2;
+                                const h = bytes[offset] | (bytes[offset + 1] << 8); offset += 2;
+
+                                // Read packed colors
+                                const byte1 = bytes[offset++];
+                                const byte2 = bytes[offset++];
+
+                                // Unpack colors (4 bits each, convert to 0-255 range)
+                                const r = ((byte1 >> 4) & 0x0F) * 16 + 8;
+                                const g = (byte1 & 0x0F) * 16 + 8;
+                                const b = ((byte2 >> 4) & 0x0F) * 16 + 8;
+
+                                rectangles.push({ x, y, w, h, r, g, b });
+                            }
+
+                            // Process rectangles using existing handler
+                            print(`ServerTextDisplay: Processing ${rectangles.length} rectangles`);
+                            this.handleRectanglePacket({ rectangles });
+                            return;
+                        }
+                    } else {
+                        // It's a JSON message in a Blob
+                        try {
+                            const message = JSON.parse(messageText);
+                            this.processJSONMessage(message);
+                            return;
+                        } catch (error) {
+                            print("ServerTextDisplay: Error parsing message: " + error);
+                        }
+                    }
                 } else {
                     // Text message
-                    messageText = event.data;
-                }
-
-                // All messages should be JSON with a type field
-                try {
-                    const message = JSON.parse(messageText);
-
-                    // Handle message based on type
-                    switch (message.type) {
-                        case "init":
-                            print("ServerTextDisplay: Received init message");
-
-                            // Set dimensions
-                            this.screenshotWidth = message.width;
-                            this.screenshotHeight = message.height;
-
-                            // Set color
-                            const color = message.color;
-                            this.updateColor(color.r, color.g, color.b, color.a);
-
-                            // Create texture
-                            if (this.screenshotWidth > 0 && this.screenshotHeight > 0 && this.image) {
-                                print(`Creating texture: ${this.screenshotWidth}x${this.screenshotHeight}`);
-                                try {
-                                    this.currentTexture = ProceduralTextureProvider.createWithFormat(
-                                        this.screenshotWidth,
-                                        this.screenshotHeight,
-                                        TextureFormat.RGBA8Unorm
-                                    );
-                                    this.currentProvider = this.currentTexture.control as ProceduralTextureProvider;
-                                    this.pixelData = new Uint8Array(this.screenshotWidth * this.screenshotHeight * 4);
-                                    this.image.mainPass.baseTex = this.currentTexture;
-                                    print("Texture created");
-                                } catch (error) {
-                                    print(`ERROR: ${error}`);
-                                }
-                            }
-
-                            // Display last message if present
-                            if (message.last_message) {
-                                this.updateText(message.last_message);
-                            }
-
-                            // Send acknowledgement
-                            print("ServerTextDisplay: Sending acknowledgement");
-                            this.socket.send("ACK");
-                            break;
-
-                        case "rectangle_packet":
-                            // Don't log rectangle packets to avoid spam
-                            this.handleRectanglePacket(message);
-                            break;
-
-                        case "text":
-                            print("ServerTextDisplay: Received text message");
-                            // Display the text data
-                            this.updateText(message.data);
-                            break;
-
-                        default:
-                            print("ServerTextDisplay: Unknown message type: " + message.type);
-                            break;
+                    const messageText = event.data;
+                    try {
+                        const message = JSON.parse(messageText);
+                        this.processJSONMessage(message);
+                        return;
+                    } catch (error) {
+                        print("ServerTextDisplay: Error parsing message: " + error);
                     }
-                } catch (error) {
-                    // If JSON parsing fails, something is wrong with the protocol
-                    print("ServerTextDisplay: ERROR - Invalid message format (not JSON): " + messageText.substring(0, 100));
-                    print("ServerTextDisplay: Error details: " + error);
                 }
             };
 

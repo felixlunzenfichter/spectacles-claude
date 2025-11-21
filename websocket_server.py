@@ -11,6 +11,8 @@ import traceback
 import json
 import os
 import time
+import struct
+import base64
 import aiohttp
 from pathlib import Path
 from watchdog.observers import Observer
@@ -140,6 +142,40 @@ def quantize_color(color, levels=16):
     step = 256 // levels
     return tuple((c // step) * step + step // 2 for c in color)
 
+def create_binary_rectangle_packet(rectangles):
+    """Create a binary encoded packet for rectangles.
+
+    Format:
+    - Header: 1 byte type (0x02) + 4 bytes count (uint32)
+    - Each rectangle: 10 bytes
+      - x: 2 bytes (uint16)
+      - y: 2 bytes (uint16)
+      - w: 2 bytes (uint16)
+      - h: 2 bytes (uint16)
+      - rgb: 2 bytes (4 bits each for R,G,B + 4 bits padding)
+    """
+    # Start with header
+    packet = bytearray()
+    packet.append(0x02)  # Message type for binary rectangle packet
+    packet.extend(struct.pack('<I', len(rectangles)))  # Count as little-endian uint32
+
+    for rect in rectangles:
+        # Pack position and dimensions
+        packet.extend(struct.pack('<HHHH', rect['x'], rect['y'], rect['w'], rect['h']))
+
+        # Pack colors (4 bits each)
+        # Convert from 0-255 to 0-15 range
+        r = rect['r'] // 16
+        g = rect['g'] // 16
+        b = rect['b'] // 16
+
+        # Pack into 2 bytes: [RRRRGGGG] [BBBB0000]
+        byte1 = (r << 4) | g
+        byte2 = (b << 4)
+        packet.extend([byte1, byte2])
+
+    return bytes(packet)
+
 def generate_delta_packets(prev_screenshot, new_screenshot):
     """Generator that yields only changed pixels as rectangles."""
     prev_screenshot = prev_screenshot.convert('RGB')
@@ -175,32 +211,40 @@ def generate_delta_packets(prev_screenshot, new_screenshot):
         log(f"   Average rectangle size: {compression_ratio:.1f} pixels")
 
     # Step 3: Send rectangles in batches using slicing
-    total_json_size = 0
     total_binary_size = 0
+    total_base64_size = 0
+    total_rectangles = 0
 
     for i in range(0, len(rectangles), RECTANGLES_PER_PACKET):
         batch = rectangles[i:i + RECTANGLES_PER_PACKET]
-        packet = {
-            'type': 'rectangle_packet',
-            'rectangles': batch
-        }
 
-        # Calculate sizes for comparison
-        json_size = len(json.dumps(packet))
-        # Binary would be: 11 bytes per rectangle + small header
-        binary_size = len(batch) * 11 + 8
+        # Create binary packet
+        binary_packet = create_binary_rectangle_packet(batch)
+        binary_size = len(binary_packet)
 
-        total_json_size += json_size
+        # Encode as Base64 and wrap in JSON
+        base64_data = base64.b64encode(binary_packet).decode('ascii')
+        json_packet = json.dumps({
+            'type': 'binary_rectangles',
+            'data': base64_data,
+            'count': len(batch)
+        })
+
+        packet_size = len(json_packet)
+
         total_binary_size += binary_size
+        total_base64_size += packet_size
+        total_rectangles += len(batch)
 
-        log(f"📦 Packet: {len(batch)} rectangles, JSON: {json_size:,} bytes, Binary would be: {binary_size:,} bytes")
-        log(f"   Reduction: {json_size/binary_size:.1f}x smaller with binary")
+        log(f"📦 Base64 Packet: {len(batch)} rectangles, binary: {binary_size:,} bytes, base64: {packet_size:,} bytes")
+        log(f"   Efficiency: {binary_size / len(batch):.1f} bytes/rectangle (binary), {packet_size / len(batch):.1f} bytes/rectangle (base64)")
 
-        yield packet
+        yield json_packet
 
-    if total_json_size > 0:
-        log(f"📊 Total: JSON: {total_json_size:,} bytes, Binary: {total_binary_size:,} bytes")
-        log(f"   Overall reduction: {total_json_size/total_binary_size:.1f}x with binary")
+    if total_rectangles > 0:
+        log(f"📊 Total: {total_rectangles} rectangles")
+        log(f"   Binary size: {total_binary_size:,} bytes ({total_binary_size / total_rectangles:.1f} bytes/rectangle)")
+        log(f"   Base64 size: {total_base64_size:,} bytes ({total_base64_size / total_rectangles:.1f} bytes/rectangle)")
 
 
 async def fetch_sun_times(lat, lon):
@@ -399,14 +443,13 @@ async def continuous_delta_updates(websocket, prev_screenshot):
     packets_sent = 0
     start_time = time.time()
 
-    for packet in generate_delta_packets(prev_screenshot, new_screenshot):
-        packet_json = json.dumps(packet)
-        packet_size = len(packet_json)
+    for json_packet in generate_delta_packets(prev_screenshot, new_screenshot):
+        packet_size = len(json_packet)
         total_bytes += packet_size
         packets_sent += 1
 
-        log(f"📤 Sending packet {packets_sent}: {packet_size:,} bytes ({len(packet['rectangles'])} rectangles)")
-        await websocket.send(packet_json)
+        log(f"📤 Sending base64 packet {packets_sent}: {packet_size:,} bytes")
+        await websocket.send(json_packet)
 
     if packets_sent > 0:
         elapsed = time.time() - start_time
