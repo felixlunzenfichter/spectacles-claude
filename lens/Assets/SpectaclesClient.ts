@@ -99,8 +99,6 @@ export class SpectaclesClient extends BaseScriptComponent {
             };
 
             this.socket.onmessage = async (event) => {
-                print("ServerTextDisplay: Received message");
-
                 // Handle both text and binary messages
                 let messageText: string;
                 if (event.data instanceof Blob) {
@@ -111,69 +109,71 @@ export class SpectaclesClient extends BaseScriptComponent {
                     messageText = event.data;
                 }
 
-                // Try to parse as JSON
+                // All messages should be JSON with a type field
                 try {
                     const message = JSON.parse(messageText);
 
-                    // Only log non-packet messages to avoid spam
-                    if (message.type !== "rectangle_packet") {
-                        print("ServerTextDisplay: Received " + message.type);
-                    }
+                    // Handle message based on type
+                    switch (message.type) {
+                        case "init":
+                            print("ServerTextDisplay: Received init message");
 
-                    if (message.type === "init") {
-                        print("ServerTextDisplay: Received init message");
+                            // Set dimensions
+                            this.screenshotWidth = message.width;
+                            this.screenshotHeight = message.height;
 
-                        // Set dimensions
-                        this.screenshotWidth = message.width;
-                        this.screenshotHeight = message.height;
+                            // Set color
+                            const color = message.color;
+                            this.updateColor(color.r, color.g, color.b, color.a);
 
-                        // Set color
-                        const color = message.color;
-                        this.updateColor(color.r, color.g, color.b, color.a);
-
-                        // Create texture
-                        if (this.screenshotWidth > 0 && this.screenshotHeight > 0 && this.image) {
-                            print(`Creating texture: ${this.screenshotWidth}x${this.screenshotHeight}`);
-                            try {
-                                this.currentTexture = ProceduralTextureProvider.createWithFormat(
-                                    this.screenshotWidth,
-                                    this.screenshotHeight,
-                                    TextureFormat.RGBA8Unorm
-                                );
-                                this.currentProvider = this.currentTexture.control as ProceduralTextureProvider;
-                                this.pixelData = new Uint8Array(this.screenshotWidth * this.screenshotHeight * 4);
-                                this.image.mainPass.baseTex = this.currentTexture;
-                                print("Texture created");
-                            } catch (error) {
-                                print(`ERROR: ${error}`);
+                            // Create texture
+                            if (this.screenshotWidth > 0 && this.screenshotHeight > 0 && this.image) {
+                                print(`Creating texture: ${this.screenshotWidth}x${this.screenshotHeight}`);
+                                try {
+                                    this.currentTexture = ProceduralTextureProvider.createWithFormat(
+                                        this.screenshotWidth,
+                                        this.screenshotHeight,
+                                        TextureFormat.RGBA8Unorm
+                                    );
+                                    this.currentProvider = this.currentTexture.control as ProceduralTextureProvider;
+                                    this.pixelData = new Uint8Array(this.screenshotWidth * this.screenshotHeight * 4);
+                                    this.image.mainPass.baseTex = this.currentTexture;
+                                    print("Texture created");
+                                } catch (error) {
+                                    print(`ERROR: ${error}`);
+                                }
                             }
-                        }
 
-                        // Display last message if present
-                        if (message.last_message) {
-                            this.updateText(message.last_message);
-                        }
+                            // Display last message if present
+                            if (message.last_message) {
+                                this.updateText(message.last_message);
+                            }
 
-                        // Send acknowledgement
-                        print("ServerTextDisplay: Sending acknowledgement");
-                        this.socket.send("ACK");
+                            // Send acknowledgement
+                            print("ServerTextDisplay: Sending acknowledgement");
+                            this.socket.send("ACK");
+                            break;
 
-                        return;
-                    }
+                        case "rectangle_packet":
+                            // Don't log rectangle packets to avoid spam
+                            this.handleRectanglePacket(message);
+                            break;
 
-                    if (message.type === "rectangle_packet") {
-                        this.handleRectanglePacket(message);
-                        return;
+                        case "text":
+                            print("ServerTextDisplay: Received text message");
+                            // Display the text data
+                            this.updateText(message.data);
+                            break;
+
+                        default:
+                            print("ServerTextDisplay: Unknown message type: " + message.type);
+                            break;
                     }
                 } catch (error) {
-                    // Not JSON, continue processing as text
-                    if (messageText.length < 200) {
-                        print("ServerTextDisplay: Non-JSON message: " + messageText.substring(0, 100));
-                    }
+                    // If JSON parsing fails, something is wrong with the protocol
+                    print("ServerTextDisplay: ERROR - Invalid message format (not JSON): " + messageText.substring(0, 100));
+                    print("ServerTextDisplay: Error details: " + error);
                 }
-
-                // Display as text
-                this.updateText(messageText);
             };
 
             this.socket.onerror = (event) => {

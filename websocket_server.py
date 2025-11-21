@@ -359,20 +359,27 @@ async def broadcast_message(message):
 
     last_sent_message = message
 
-    # Print FULL message being sent
+    # Wrap text message in consistent JSON format
+    json_message = {
+        'type': 'text',
+        'data': message
+    }
+    json_string = json.dumps(json_message)
+
+    # Print message being sent
     log("=" * 60)
-    log("📤 FULL MESSAGE BEING SENT:")
+    log("📤 SENDING TEXT MESSAGE:")
     log("=" * 60)
-    log(message)
+    log(f"   Type: text")
+    log(f"   Data length: {len(message)} characters")
+    log(f"   Preview: {message[:100]}..." if len(message) > 100 else f"   Data: {message}")
     log("=" * 60)
     global current_client
-
-    log(f"   Message length: {len(message)} characters")
 
     # Send to THE client if connected
     if current_client:
         try:
-            await current_client.send(message)
+            await current_client.send(json_string)
             log(f"   ✅ Sent to {current_client.remote_address}")
         except Exception as e:
             log(f"   ❌ Failed to send to client: {e}")
