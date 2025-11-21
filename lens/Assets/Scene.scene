@@ -189,7 +189,6 @@
     []
   Components:
     - !<own> 012bc09d-c49f-4216-9831-7d5549ad4917
-    - !<own> f76971c6-d7ab-4c38-98c2-dae410066cc6
 - !<Image/c3216d35-9779-4704-bfbd-0adf4c30a8bc>
   PrefabRemaps:
     []
@@ -219,21 +218,3 @@
     InvertRotation: false
   SurfaceOptions: !<SurfaceOptions>
     EnhanceWithNativeAR: false
-- !<ScriptComponent/f76971c6-d7ab-4c38-98c2-dae410066cc6>
-  PrefabRemaps:
-    []
-  Name: SpectaclesClient
-  Enabled: false
-  ScriptAsset: !<reference> d59126a5-1704-4258-bee1-0bd5863fdc9e
-  ScriptInputsDefault:
-    serverUrl: true
-  ScriptTypesDefault:
-    {}
-  ScriptInputs:
-    "":
-      textComponent: !<reference.Text> 012bc09d-c49f-4216-9831-7d5549ad4917
-      image: !<reference.Image> c3216d35-9779-4704-bfbd-0adf4c30a8bc
-      serverUrl: "ws://172.20.10.3:8080"
-  ScriptTypes:
-    "":
-      {}
