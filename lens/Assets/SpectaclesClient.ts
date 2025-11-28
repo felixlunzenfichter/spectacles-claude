@@ -21,7 +21,6 @@ export class SpectaclesClient extends BaseScriptComponent {
 
     private readonly MAX_ROWS = 50;
     private readonly CONTENT_WIDTH = 64;
-    private readonly MAX_CONVERSATION_LINES = 500;
     private completeConversation: string[] = [];
 
     private screenshotWidth: number = 0;
@@ -379,11 +378,6 @@ export class SpectaclesClient extends BaseScriptComponent {
             // Split new text by newline and append to conversation
             const newLines = newText.split('\n');
             this.completeConversation.push(...newLines);
-
-            // Keep only the last 500 lines
-            if (this.completeConversation.length > this.MAX_CONVERSATION_LINES) {
-                this.completeConversation = this.completeConversation.slice(-this.MAX_CONVERSATION_LINES);
-            }
 
             // Format complete conversation into columns
             const formatted = this.formatConversation();
