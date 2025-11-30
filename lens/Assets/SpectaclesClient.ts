@@ -19,7 +19,8 @@ export class SpectaclesClient extends BaseScriptComponent {
     private lastPrintTime: number = 0;
     private printDelay: number = 1.0;  // Print status every 1 second
 
-    private readonly MAX_ROWS = 50;
+    private readonly MAX_ROWS_PER_COLUMN = 50;
+    private readonly MAX_DISPLAY_ROWS = 500;
     private readonly CONTENT_WIDTH = 64;
     private completeConversation: string[] = [];
 
@@ -422,34 +423,42 @@ export class SpectaclesClient extends BaseScriptComponent {
             }
         }
 
-        // Step 2: Create empty display grid
+        // Step 2: Take the last N rows to keep display stable when adding rows
+        // Take MAX_DISPLAY_ROWS + (allRows.length % MAX_ROWS_PER_COLUMN) to ensure column alignment
+        const remainder = allRows.length % this.MAX_ROWS_PER_COLUMN;
+        const rowsToTake = Math.min(allRows.length, this.MAX_DISPLAY_ROWS + remainder);
+        const startIndex = allRows.length - rowsToTake;
+        const displayAllRows = allRows.slice(startIndex);
+        const displayIsFirstSegment = isFirstSegment.slice(startIndex);
+
+        // Step 3: Create empty display grid
         const displayRows: string[] = [];
-        for (let i = 0; i < this.MAX_ROWS; i++) {
+        for (let i = 0; i < this.MAX_ROWS_PER_COLUMN; i++) {
             displayRows.push('');
         }
 
-        // Step 3: Add labels and padding, then prepend to display grid
-        for (let i = 0; i < allRows.length; i++) {
-            const rowIndex = i % this.MAX_ROWS;
-            const label = i.toString() + ' ';
+        // Step 4: Add labels and padding, then prepend to display grid
+        for (let i = 0; i < displayAllRows.length; i++) {
+            const rowIndex = i % this.MAX_ROWS_PER_COLUMN;
+            const label = (startIndex + i).toString() + ' ';
             let formattedRow: string;
 
-            if (isFirstSegment[i]) {
+            if (displayIsFirstSegment[i]) {
                 // First segment: left-aligned (padEnd)
-                formattedRow = label + allRows[i].padEnd(this.CONTENT_WIDTH, ' ');
+                formattedRow = label + displayAllRows[i].padEnd(this.CONTENT_WIDTH, ' ');
             } else {
                 // Continuation: right-aligned (padStart)
-                formattedRow = label + allRows[i].padStart(this.CONTENT_WIDTH, ' ');
+                formattedRow = label + displayAllRows[i].padStart(this.CONTENT_WIDTH, ' ');
             }
 
             displayRows[rowIndex] = displayRows[rowIndex] + ' ' + formattedRow;
         }
 
-        // Step 4: Append empty rows to push older content left
-        const emptyRowsNeeded = allRows.length % this.MAX_ROWS;
+        // Step 5: Append empty rows to push older content left
+        const emptyRowsNeeded = displayAllRows.length % this.MAX_ROWS_PER_COLUMN;
         if (emptyRowsNeeded > 0) {
-            for (let i = emptyRowsNeeded; i < this.MAX_ROWS; i++) {
-                const emptyRowIndex = allRows.length + (i - emptyRowsNeeded);
+            for (let i = emptyRowsNeeded; i < this.MAX_ROWS_PER_COLUMN; i++) {
+                const emptyRowIndex = startIndex + displayAllRows.length + (i - emptyRowsNeeded);
                 const label = emptyRowIndex.toString() + ' ';
                 const emptyRow = label + ''.padEnd(this.CONTENT_WIDTH, ' ');
                 displayRows[i] = displayRows[i] + ' ' + emptyRow;
