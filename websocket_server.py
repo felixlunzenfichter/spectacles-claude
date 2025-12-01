@@ -433,30 +433,49 @@ async def broadcast_message(message):
     else:
         log(f"   ⚠️  No client connected - message not sent")
 
-async def continuous_delta_updates(websocket, prev_screenshot):
-    """Recursively capture and send delta updates."""
-    new_screenshot = ImageGrab.grab()
-    # Resize to 1920x1080 for consistent quality
-    new_screenshot = new_screenshot.resize((1920, 1080), Image.LANCZOS)
+async def jpeg_screenshot_loop(websocket):
+    """Capture and send JPEG screenshots at 4 FPS, skip if unchanged."""
+    import io
+    import hashlib
 
-    total_bytes = 0
-    packets_sent = 0
-    start_time = time.time()
+    prev_hash = None
 
-    for json_packet in generate_delta_packets(prev_screenshot, new_screenshot):
-        packet_size = len(json_packet)
-        total_bytes += packet_size
-        packets_sent += 1
+    while True:
+        # Take screenshot (max 2048 on Spectacles)
+        screenshot = ImageGrab.grab()
+        screenshot = screenshot.resize((2048, 1152), Image.LANCZOS)
+        screenshot = screenshot.convert('RGB')
 
-        log(f"📤 Sending base64 packet {packets_sent}: {packet_size:,} bytes")
-        await websocket.send(json_packet)
+        # Encode as JPEG
+        buffer = io.BytesIO()
+        screenshot.save(buffer, format='JPEG', quality=75)
+        jpeg_bytes = buffer.getvalue()
 
-    if packets_sent > 0:
-        elapsed = time.time() - start_time
-        log(f"📊 Frame summary: {packets_sent} packets, {total_bytes:,} bytes total, {elapsed*1000:.1f}ms")
-        log(f"   Data rate: {total_bytes/1024:.1f} KB/frame")
+        # Hash check - skip if identical
+        current_hash = hashlib.md5(jpeg_bytes).hexdigest()
+        if current_hash == prev_hash:
+            # Nothing changed, skip
+            await asyncio.sleep(0.25)
+            continue
 
-    await continuous_delta_updates(websocket, new_screenshot)
+        prev_hash = current_hash
+
+        # Convert to Base64 and send
+        base64_jpg = base64.b64encode(jpeg_bytes).decode('ascii')
+        message = json.dumps({
+            'type': 'jpeg',
+            'data': base64_jpg
+        })
+
+        log(f"📤 Sending JPEG: {screenshot.width}x{screenshot.height}, {len(jpeg_bytes):,} bytes")
+        await websocket.send(message)
+
+        # Wait for acknowledgment
+        ack = await websocket.recv()
+        log(f"✅ Received ack: {ack}")
+
+        # Wait 1 second
+        await asyncio.sleep(1.0)
 
 async def handle_client(websocket):
     """Handle a client connection."""
@@ -519,12 +538,9 @@ async def handle_client(websocket):
         ack = await websocket.recv()
         log(f"✅ Received acknowledgement: {ack}")
 
-        # Start with black screen (no initial full screenshot)
-        prev_screenshot = Image.new('RGB', (screen_width, screen_height), (0, 0, 0))
-
-        # Start recursive delta updates
-        log(f"🔄 Starting recursive delta updates")
-        await continuous_delta_updates(websocket, prev_screenshot)
+        # Start JPEG screenshot loop
+        log(f"🔄 Starting JPEG screenshot loop (1 FPS)")
+        await jpeg_screenshot_loop(websocket)
 
     except websockets.exceptions.ConnectionClosed as e:
         log(f"🔌 CLIENT DISCONNECTED: {client_addr}")
