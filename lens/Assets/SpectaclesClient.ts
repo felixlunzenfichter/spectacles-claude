@@ -21,7 +21,7 @@ export class SpectaclesClient extends BaseScriptComponent {
 
     private readonly MAX_ROWS_PER_COLUMN = 50;
     private readonly MAX_DISPLAY_ROWS = 500;
-    private readonly CONTENT_WIDTH = 64;
+    private readonly MAX_CONTENT_WIDTH = 80;
     private completeConversation: string[] = [];
 
     private screenshotWidth: number = 0;
@@ -403,9 +403,9 @@ export class SpectaclesClient extends BaseScriptComponent {
             let isFirst = true;
 
             while (remaining.length > 0) {
-                if (remaining.length > this.CONTENT_WIDTH) {
-                    let breakPoint = this.CONTENT_WIDTH;
-                    const segment = remaining.substring(0, this.CONTENT_WIDTH);
+                if (remaining.length > this.MAX_CONTENT_WIDTH) {
+                    let breakPoint = this.MAX_CONTENT_WIDTH;
+                    const segment = remaining.substring(0, this.MAX_CONTENT_WIDTH);
                     const lastSpace = segment.lastIndexOf(' ');
                     if (lastSpace > 0) {
                         breakPoint = lastSpace;
@@ -431,36 +431,60 @@ export class SpectaclesClient extends BaseScriptComponent {
         const displayAllRows = allRows.slice(startIndex);
         const displayIsFirstSegment = isFirstSegment.slice(startIndex);
 
-        // Step 3: Create empty display grid
-        const displayRows: string[] = [];
-        for (let i = 0; i < this.MAX_ROWS_PER_COLUMN; i++) {
-            displayRows.push('');
+        // Trim old lines from completeConversation to prevent unbounded growth
+        let linesToRemove = 0;
+        for (let i = 0; i < startIndex; i++) {
+            if (isFirstSegment[i]) {
+                linesToRemove++;
+            }
+        }
+        if (linesToRemove > 0) {
+            this.completeConversation.splice(0, linesToRemove);
         }
 
-        // Step 4: Add labels and padding, then prepend to display grid
+        // Step 3: Calculate width for each column based on longest element
+        const numColumns = Math.ceil(displayAllRows.length / this.MAX_ROWS_PER_COLUMN);
+        const columnWidths: number[] = [];
+        for (let col = 0; col < numColumns; col++) {
+            const startIdx = col * this.MAX_ROWS_PER_COLUMN;
+            const endIdx = Math.min(startIdx + this.MAX_ROWS_PER_COLUMN, displayAllRows.length);
+            let maxWidth = 0;
+            for (let i = startIdx; i < endIdx; i++) {
+                maxWidth = Math.max(maxWidth, displayAllRows[i].length);
+            }
+            columnWidths.push(Math.min(maxWidth, this.MAX_CONTENT_WIDTH));
+        }
+
+        // Step 4: Create empty display grid
+        const displayRows: string[] = [];
+        for (let i = 0; i < this.MAX_ROWS_PER_COLUMN; i++) {
+            displayRows.push('|');
+        }
+
+        // Step 5: Add bars and padding, then prepend to display grid
         for (let i = 0; i < displayAllRows.length; i++) {
             const rowIndex = i % this.MAX_ROWS_PER_COLUMN;
-            const label = (startIndex + i).toString() + ' ';
+            const colIndex = Math.floor(i / this.MAX_ROWS_PER_COLUMN);
+            const colWidth = columnWidths[colIndex];
             let formattedRow: string;
 
             if (displayIsFirstSegment[i]) {
                 // First segment: left-aligned (padEnd)
-                formattedRow = label + displayAllRows[i].padEnd(this.CONTENT_WIDTH, ' ');
+                formattedRow = '|' + displayAllRows[i].padEnd(colWidth, ' ');
             } else {
                 // Continuation: right-aligned (padStart)
-                formattedRow = label + displayAllRows[i].padStart(this.CONTENT_WIDTH, ' ');
+                formattedRow = '|' + displayAllRows[i].padStart(colWidth, ' ');
             }
 
             displayRows[rowIndex] = displayRows[rowIndex] + ' ' + formattedRow;
         }
 
-        // Step 5: Append empty rows to push older content left
+        // Step 6: Append empty rows to push older content left
         const emptyRowsNeeded = displayAllRows.length % this.MAX_ROWS_PER_COLUMN;
         if (emptyRowsNeeded > 0) {
+            const lastColWidth = columnWidths[columnWidths.length - 1];
             for (let i = emptyRowsNeeded; i < this.MAX_ROWS_PER_COLUMN; i++) {
-                const emptyRowIndex = startIndex + displayAllRows.length + (i - emptyRowsNeeded);
-                const label = emptyRowIndex.toString() + ' ';
-                const emptyRow = label + ''.padEnd(this.CONTENT_WIDTH, ' ');
+                const emptyRow = '|'.padEnd(lastColWidth + 1, ' ');
                 displayRows[i] = displayRows[i] + ' ' + emptyRow;
             }
         }
