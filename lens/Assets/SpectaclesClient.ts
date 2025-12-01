@@ -6,14 +6,12 @@ export class SpectaclesClient extends BaseScriptComponent {
     @input
     image: Image;
 
-    @input
-    serverUrl: string = "ws://172.20.10.3:8080";  // Mac server IP address
+    private readonly SERVER_URL = "ws://172.20.10.3:8080";
 
     private startTime: number;
     private socket: WebSocket = null;
     private connected: boolean = false;
     private internetModule: any;
-    private rawText: string = "";  // Store raw unformatted text
     private lastReconnectAttempt: number = 0;
     private reconnectDelay: number = 3.0;  // Try reconnecting every 3 seconds
     private lastPrintTime: number = 0;
@@ -94,11 +92,11 @@ export class SpectaclesClient extends BaseScriptComponent {
     }
 
     connectToServer() {
-        print("ServerTextDisplay: Attempting to connect to " + this.serverUrl);
+        print("ServerTextDisplay: Attempting to connect to " + this.SERVER_URL);
 
         try {
             // Create WebSocket connection
-            this.socket = this.internetModule.createWebSocket(this.serverUrl);
+            this.socket = this.internetModule.createWebSocket(this.SERVER_URL);
 
             // Set up event handlers
             this.socket.onopen = (event) => {
@@ -126,7 +124,7 @@ export class SpectaclesClient extends BaseScriptComponent {
             this.socket.onerror = (event) => {
                 print("ServerTextDisplay: WebSocket error occurred");
                 print("ServerTextDisplay: Error event details: " + JSON.stringify(event));
-                print("ServerTextDisplay: Server URL: " + this.serverUrl);
+                print("ServerTextDisplay: Server URL: " + this.SERVER_URL);
                 print("ServerTextDisplay: Socket state: " + (this.socket ? this.socket.readyState : "null"));
                 this.connected = false;
                 this.updateText("Connection error!");
@@ -137,7 +135,7 @@ export class SpectaclesClient extends BaseScriptComponent {
                 print("ServerTextDisplay: Close code: " + event.code);
                 print("ServerTextDisplay: Close reason: " + event.reason);
                 print("ServerTextDisplay: Was clean: " + event.wasClean);
-                print("ServerTextDisplay: Server URL: " + this.serverUrl);
+                print("ServerTextDisplay: Server URL: " + this.SERVER_URL);
                 this.connected = false;
                 this.socket = null;
                 this.updateText("Disconnected - will reconnect...");
@@ -148,7 +146,7 @@ export class SpectaclesClient extends BaseScriptComponent {
             print("ServerTextDisplay: Error: " + error);
             print("ServerTextDisplay: Error type: " + typeof error);
             print("ServerTextDisplay: Error message: " + (error.message || "No message"));
-            print("ServerTextDisplay: Server URL: " + this.serverUrl);
+            print("ServerTextDisplay: Server URL: " + this.SERVER_URL);
             this.updateText("Failed to connect!");
         }
     }

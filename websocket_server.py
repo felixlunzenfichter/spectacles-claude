@@ -10,8 +10,6 @@ import datetime
 import traceback
 import json
 import os
-import time
-import struct
 import base64
 import aiohttp
 from pathlib import Path
@@ -29,222 +27,10 @@ last_sent_message = None
 sun_times_data = None
 location_data = None
 
-# Screen dimensions - set during client connection
-screen_width = None
-screen_height = None
-
-# Constants for compression
-RECTANGLES_PER_PACKET = 100000  # 100,000 rectangles per packet
-
 def log(message):
     """Print a timestamped log message."""
     timestamp = datetime.datetime.now().strftime('%H:%M:%S')
     print(f"[{timestamp}] {message}")
-
-
-def merge_pixels_to_rectangles(changed_pixels):
-    """
-    Convert changed pixels into minimum number of rectangles.
-    Greedy approach: maximize X first, then Y.
-    """
-    rectangles = []
-    visited = set()
-
-    # Process pixels in normal screen order (top to bottom)
-    for y in range(screen_height):
-        for x in range(screen_width):
-            # Direct lookup - no additional flipping needed
-            if (x, y) in changed_pixels and (x, y) not in visited:
-                color = changed_pixels[(x, y)]
-
-                # Grow rectangle: X first, then Y
-                rect = grow_rectangle_greedy(changed_pixels, x, y, color, visited)
-                rectangles.append(rect)
-
-    return rectangles
-
-
-def grow_rectangle_greedy(changed_pixels, start_x, start_y, color, visited):
-    """
-    Grow rectangle greedily: expand X as far as possible, then Y.
-    """
-    # Step 1: Expand X (go right as far as possible)
-    max_x = start_x
-    while (max_x + 1, start_y) in changed_pixels and \
-          changed_pixels[(max_x + 1, start_y)] == color and \
-          (max_x + 1, start_y) not in visited:
-        max_x += 1
-
-    # Step 2: Expand Y (go down as far as possible with the full width)
-    max_y = start_y
-    can_expand = True
-
-    while can_expand:
-        test_y = max_y + 1
-
-        # Check if entire next row has the same color
-        for test_x in range(start_x, max_x + 1):
-            if (test_x, test_y) not in changed_pixels or \
-               changed_pixels[(test_x, test_y)] != color or \
-               (test_x, test_y) in visited:
-                can_expand = False
-                break
-
-        if can_expand:
-            max_y = test_y
-
-    # Step 3: Mark all pixels in rectangle as visited
-    for y in range(start_y, max_y + 1):
-        for x in range(start_x, max_x + 1):
-            visited.add((x, y))
-
-    # Step 4: Return the rectangle with compact format
-    return {
-        'x': start_x,
-        'y': start_y,
-        'w': max_x - start_x + 1,
-        'h': max_y - start_y + 1,
-        'r': color[0],
-        'g': color[1],
-        'b': color[2]
-    }
-
-def generate_screenshot_packets(screenshot, pixels_per_packet=100000):
-    """Generator that yields screenshot packets."""
-    width, height = screenshot.size
-    screenshot = screenshot.convert('RGB')
-    pixels = screenshot.load()
-
-    pixel_buffer = []
-
-    for y in range(height):
-        for x in range(width):
-            r, g, b = pixels[x, y]
-            pixel_buffer.append([x, height - 1 - y, r, g, b])
-
-            if len(pixel_buffer) >= pixels_per_packet:
-                packet = {
-                    'type': 'screenshot_packet',
-                    'pixels': pixel_buffer
-                }
-                yield packet
-                pixel_buffer = []
-
-    if pixel_buffer:
-        packet = {
-            'type': 'screenshot_packet',
-            'pixels': pixel_buffer
-        }
-        yield packet
-
-def quantize_color(color, levels=16):
-    """Quantize color to reduce precision and improve compression."""
-    step = 256 // levels
-    return tuple((c // step) * step + step // 2 for c in color)
-
-def create_binary_rectangle_packet(rectangles):
-    """Create a binary encoded packet for rectangles.
-
-    Format:
-    - Header: 1 byte type (0x02) + 4 bytes count (uint32)
-    - Each rectangle: 10 bytes
-      - x: 2 bytes (uint16)
-      - y: 2 bytes (uint16)
-      - w: 2 bytes (uint16)
-      - h: 2 bytes (uint16)
-      - rgb: 2 bytes (4 bits each for R,G,B + 4 bits padding)
-    """
-    # Start with header
-    packet = bytearray()
-    packet.append(0x02)  # Message type for binary rectangle packet
-    packet.extend(struct.pack('<I', len(rectangles)))  # Count as little-endian uint32
-
-    for rect in rectangles:
-        # Pack position and dimensions
-        packet.extend(struct.pack('<HHHH', rect['x'], rect['y'], rect['w'], rect['h']))
-
-        # Pack colors (4 bits each)
-        # Convert from 0-255 to 0-15 range
-        r = rect['r'] // 16
-        g = rect['g'] // 16
-        b = rect['b'] // 16
-
-        # Pack into 2 bytes: [RRRRGGGG] [BBBB0000]
-        byte1 = (r << 4) | g
-        byte2 = (b << 4)
-        packet.extend([byte1, byte2])
-
-    return bytes(packet)
-
-def generate_delta_packets(prev_screenshot, new_screenshot):
-    """Generator that yields only changed pixels as rectangles."""
-    prev_screenshot = prev_screenshot.convert('RGB')
-    new_screenshot = new_screenshot.convert('RGB')
-    prev_pixels = prev_screenshot.load()
-    new_pixels = new_screenshot.load()
-
-    # Step 1: Find all changed pixels (with color quantization)
-    changed_pixels = {}
-
-    for y in range(screen_height):
-        for x in range(screen_width):
-            prev_r, prev_g, prev_b = prev_pixels[x, y]
-            new_r, new_g, new_b = new_pixels[x, y]
-
-            if prev_r != new_r or prev_g != new_g or prev_b != new_b:
-                # Quantize the color to reduce variations
-                quantized_color = quantize_color((new_r, new_g, new_b))
-                # No Y-flipping - use normal coordinates
-                changed_pixels[(x, y)] = quantized_color
-
-    # If no changes, don't send anything
-    if not changed_pixels:
-        return
-
-    # Step 2: Convert changed pixels into rectangles
-    rectangles = merge_pixels_to_rectangles(changed_pixels)
-
-    # Log compression stats
-    log(f"📊 Compression: {len(changed_pixels)} pixels → {len(rectangles)} rectangles")
-    if rectangles:
-        compression_ratio = len(changed_pixels) / len(rectangles)
-        log(f"   Average rectangle size: {compression_ratio:.1f} pixels")
-
-    # Step 3: Send rectangles in batches using slicing
-    total_binary_size = 0
-    total_base64_size = 0
-    total_rectangles = 0
-
-    for i in range(0, len(rectangles), RECTANGLES_PER_PACKET):
-        batch = rectangles[i:i + RECTANGLES_PER_PACKET]
-
-        # Create binary packet
-        binary_packet = create_binary_rectangle_packet(batch)
-        binary_size = len(binary_packet)
-
-        # Encode as Base64 and wrap in JSON
-        base64_data = base64.b64encode(binary_packet).decode('ascii')
-        json_packet = json.dumps({
-            'type': 'binary_rectangles',
-            'data': base64_data,
-            'count': len(batch)
-        })
-
-        packet_size = len(json_packet)
-
-        total_binary_size += binary_size
-        total_base64_size += packet_size
-        total_rectangles += len(batch)
-
-        log(f"📦 Base64 Packet: {len(batch)} rectangles, binary: {binary_size:,} bytes, base64: {packet_size:,} bytes")
-        log(f"   Efficiency: {binary_size / len(batch):.1f} bytes/rectangle (binary), {packet_size / len(batch):.1f} bytes/rectangle (base64)")
-
-        yield json_packet
-
-    if total_rectangles > 0:
-        log(f"📊 Total: {total_rectangles} rectangles")
-        log(f"   Binary size: {total_binary_size:,} bytes ({total_binary_size / total_rectangles:.1f} bytes/rectangle)")
-        log(f"   Base64 size: {total_base64_size:,} bytes ({total_base64_size / total_rectangles:.1f} bytes/rectangle)")
 
 
 async def fetch_sun_times(lat, lon):
@@ -479,7 +265,7 @@ async def jpeg_screenshot_loop(websocket):
 
 async def handle_client(websocket):
     """Handle a client connection."""
-    global sun_times_data, location_data, current_client, screen_width, screen_height
+    global sun_times_data, location_data, current_client
 
     client_addr = websocket.remote_address
     client_ip = client_addr[0] if client_addr else "unknown"
@@ -508,18 +294,14 @@ async def handle_client(websocket):
     log(f"   This is THE client - all data will be sent here")
 
     try:
-        # Set fixed dimensions for consistency
-        screen_width, screen_height = 1920, 1080
-        log(f"📸 Fixed screen dimensions: {screen_width}x{screen_height}")
-
         # Get color and phase based on sun position
         color, phase = get_sun_phase_color(sun_times_data) if sun_times_data else ((1.0, 0.0, 0.0, 1.0), "night")
 
         # Create single initialization message
         init_message = {
             'type': 'init',
-            'width': screen_width,
-            'height': screen_height,
+            'width': 2048,
+            'height': 1152,
             'color': {
                 'r': color[0],
                 'g': color[1],
@@ -529,7 +311,7 @@ async def handle_client(websocket):
             'last_message': last_sent_message if last_sent_message else None
         }
 
-        log(f"📤 Sending init to {client_addr}: {phase} - {color} - {screen_width}x{screen_height}")
+        log(f"📤 Sending init to {client_addr}: {phase} - {color}")
         await websocket.send(json.dumps(init_message))
         log(f"✅ Init message sent successfully")
 
