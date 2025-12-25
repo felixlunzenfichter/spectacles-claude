@@ -6,7 +6,7 @@ export class SpectaclesClient extends BaseScriptComponent {
     @input
     image: Image;
 
-    private readonly SERVER_URL = "ws://172.20.10.3:8080";
+    private readonly SERVER_URL = "ws://Felixs-MacBook-Pro.local:8080";
 
     private startTime: number;
     private socket: WebSocket = null;
@@ -17,9 +17,9 @@ export class SpectaclesClient extends BaseScriptComponent {
     private lastPrintTime: number = 0;
     private printDelay: number = 1.0;  // Print status every 1 second
 
-    private readonly MAX_ROWS_PER_COLUMN = 50;
+    private readonly MAX_ROWS_PER_COLUMN = 100;
     private readonly MAX_DISPLAY_ROWS = 500;
-    private readonly MAX_CONTENT_WIDTH = 80;
+    private readonly MAX_CONTENT_WIDTH = 100;
     private completeConversation: string[] = [];
 
     onAwake() {
@@ -92,6 +92,11 @@ export class SpectaclesClient extends BaseScriptComponent {
     }
 
     connectToServer() {
+        if (global.deviceInfoSystem.isEditor()) {
+            print("Running in Lens Studio editor - skipping WebSocket connection");
+            return;
+        }
+
         print("ServerTextDisplay: Attempting to connect to " + this.SERVER_URL);
 
         try {

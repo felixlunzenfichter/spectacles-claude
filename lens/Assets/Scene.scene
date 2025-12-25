@@ -163,14 +163,13 @@
   Enabled: true
   ScriptAsset: !<reference> d59126a5-1704-4258-bee1-0bd5863fdc9e
   ScriptInputsDefault:
-    serverUrl: true
+    {}
   ScriptTypesDefault:
     {}
   ScriptInputs:
     "":
       textComponent: !<reference.Text> 012bc09d-c49f-4216-9831-7d5549ad4917
       image: !<reference.Image> c3216d35-9779-4704-bfbd-0adf4c30a8bc
-      serverUrl: "ws://172.20.10.3:8080"
   ScriptTypes:
     "":
       {}
@@ -181,7 +180,7 @@
   Enabled: true
   Layers: 1
   LocalTransform: !<TransformEntity>
-    Position: {x: 500.000000, y: 150.000000, z: -1000.000000}
+    Position: {x: 750.000000, y: 350.000000, z: -1000.000000}
     Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
     Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
     HasSegmentScaleCompensation: false

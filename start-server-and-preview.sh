@@ -10,8 +10,9 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 echo "Checking for existing server on port 8080..."
 lsof -ti:8080 | xargs kill -9 2>/dev/null || true
 
-# Start the WebSocket server in the background
+# Activate virtual environment and start the WebSocket server in the background
 echo "Starting WebSocket server..."
+source "$SCRIPT_DIR/venv/bin/activate"
 python3 "$SCRIPT_DIR/websocket_server.py" &
 SERVER_PID=$!
 echo "WebSocket server started (PID: $SERVER_PID)"
