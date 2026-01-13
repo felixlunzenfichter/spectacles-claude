@@ -320,7 +320,7 @@ async def handle_client(websocket):
     client_ip = client_addr[0] if client_addr else "unknown"
 
     # HARDCODED: Only accept connections from Spectacles
-    SPECTACLES_IP = "172.20.10.9"
+    SPECTACLES_IP = "192.168.91.219"
 
     # Check if this is the Spectacles
     if client_ip != SPECTACLES_IP:
@@ -463,7 +463,7 @@ async def main():
 
     log("=" * 60)
     log("⏳ Waiting for Spectacles connection...")
-    log("   📱 Only accepting connections from: 172.20.10.9")
+    log("   📱 Only accepting connections from: 192.168.91.219")
     log("   🚫 Blocking all other connections (Lens Studio, localhost, etc.)")
     log("   ⚠️  Only one client allowed at a time")
     log("")

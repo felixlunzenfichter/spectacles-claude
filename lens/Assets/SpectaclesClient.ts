@@ -1,3 +1,5 @@
+import { DEVICE_SECRET, RELAY_URL } from "./secrets";
+
 @component
 export class SpectaclesClient extends BaseScriptComponent {
     @input
@@ -6,7 +8,8 @@ export class SpectaclesClient extends BaseScriptComponent {
     @input
     image: Image;
 
-    private readonly SERVER_URL = "ws://Felixs-MacBook-Pro.local:8080";
+    // Build WebSocket URL for relay connection
+    private readonly relayWsUrl = `${RELAY_URL.replace('https', 'wss')}/ws/client?device_secret=${DEVICE_SECRET}`;
 
     private startTime: number;
     private socket: WebSocket = null;
@@ -16,6 +19,7 @@ export class SpectaclesClient extends BaseScriptComponent {
     private reconnectDelay: number = 3.0;  // Try reconnecting every 3 seconds
     private lastPrintTime: number = 0;
     private printDelay: number = 1.0;  // Print status every 1 second
+    private peerConnected: boolean = false;
 
     private readonly MAX_ROWS_PER_COLUMN = 100;
     private readonly MAX_DISPLAY_ROWS = 500;
@@ -43,6 +47,18 @@ export class SpectaclesClient extends BaseScriptComponent {
     processJSONMessage(message: any) {
         // Handle message based on type
         switch (message.type) {
+            case "relay_notification":
+                // Handle relay notifications about peer connection status
+                print("SpectaclesClient: Relay notification - " + message.event);
+                if (message.event === "peer_connected") {
+                    this.peerConnected = true;
+                    this.updateText("Mac connected to relay!");
+                } else if (message.event === "peer_disconnected") {
+                    this.peerConnected = false;
+                    this.updateText("Mac disconnected from relay");
+                }
+                break;
+
             case "init":
                 print("ServerTextDisplay: Received init message");
 
@@ -97,17 +113,17 @@ export class SpectaclesClient extends BaseScriptComponent {
             return;
         }
 
-        print("ServerTextDisplay: Attempting to connect to " + this.SERVER_URL);
+        print("SpectaclesClient: Connecting to relay at " + this.relayWsUrl);
 
         try {
-            // Create WebSocket connection
-            this.socket = this.internetModule.createWebSocket(this.SERVER_URL);
+            // Create WebSocket connection directly to relay
+            this.socket = this.internetModule.createWebSocket(this.relayWsUrl);
 
             // Set up event handlers
             this.socket.onopen = (event) => {
-                print("ServerTextDisplay: WebSocket connected!");
+                print("SpectaclesClient: Connected to relay!");
                 this.connected = true;
-                this.updateText("Connected to server!");
+                this.updateText("Connected to relay, waiting for Mac...");
             };
 
             this.socket.onmessage = async (event) => {
@@ -122,36 +138,37 @@ export class SpectaclesClient extends BaseScriptComponent {
                     const message = JSON.parse(messageText);
                     this.processJSONMessage(message);
                 } catch (error) {
-                    print("ServerTextDisplay: Error parsing message: " + error);
+                    print("SpectaclesClient: Error parsing message: " + error);
                 }
             };
 
             this.socket.onerror = (event) => {
-                print("ServerTextDisplay: WebSocket error occurred");
-                print("ServerTextDisplay: Error event details: " + JSON.stringify(event));
-                print("ServerTextDisplay: Server URL: " + this.SERVER_URL);
-                print("ServerTextDisplay: Socket state: " + (this.socket ? this.socket.readyState : "null"));
+                print("SpectaclesClient: WebSocket error occurred");
+                print("SpectaclesClient: Error event details: " + JSON.stringify(event));
+                print("SpectaclesClient: Relay URL: " + this.relayWsUrl);
+                print("SpectaclesClient: Socket state: " + (this.socket ? this.socket.readyState : "null"));
                 this.connected = false;
+                this.peerConnected = false;
                 this.updateText("Connection error!");
             };
 
             this.socket.onclose = (event) => {
-                print("ServerTextDisplay: WebSocket closed");
-                print("ServerTextDisplay: Close code: " + event.code);
-                print("ServerTextDisplay: Close reason: " + event.reason);
-                print("ServerTextDisplay: Was clean: " + event.wasClean);
-                print("ServerTextDisplay: Server URL: " + this.SERVER_URL);
+                print("SpectaclesClient: WebSocket closed");
+                print("SpectaclesClient: Close code: " + event.code);
+                print("SpectaclesClient: Close reason: " + event.reason);
+                print("SpectaclesClient: Was clean: " + event.wasClean);
                 this.connected = false;
+                this.peerConnected = false;
                 this.socket = null;
                 this.updateText("Disconnected - will reconnect...");
             };
 
         } catch (error) {
-            print("ServerTextDisplay: Failed to create WebSocket");
-            print("ServerTextDisplay: Error: " + error);
-            print("ServerTextDisplay: Error type: " + typeof error);
-            print("ServerTextDisplay: Error message: " + (error.message || "No message"));
-            print("ServerTextDisplay: Server URL: " + this.SERVER_URL);
+            print("SpectaclesClient: Failed to create WebSocket");
+            print("SpectaclesClient: Error: " + error);
+            print("SpectaclesClient: Error type: " + typeof error);
+            print("SpectaclesClient: Error message: " + (error.message || "No message"));
+            print("SpectaclesClient: Relay URL: " + this.relayWsUrl);
             this.updateText("Failed to connect!");
         }
     }

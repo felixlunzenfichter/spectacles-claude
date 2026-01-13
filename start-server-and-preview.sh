@@ -6,35 +6,32 @@ echo "=============================================="
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-# Kill any existing server on port 8080
-echo "Checking for existing server on port 8080..."
-lsof -ti:8080 | xargs kill -9 2>/dev/null || true
+# Kill any existing server
+pkill -f websocket_server.py 2>/dev/null
 
-# Activate virtual environment and start the WebSocket server in the background
-echo "Starting WebSocket server..."
+# Activate virtual environment and start the server in background
+echo "Connecting to relay server..."
 source "$SCRIPT_DIR/venv/bin/activate"
 python3 "$SCRIPT_DIR/websocket_server.py" &
 SERVER_PID=$!
-echo "WebSocket server started (PID: $SERVER_PID)"
+echo "Server started (PID: $SERVER_PID)"
 
-# Wait a moment for server to start
-sleep 2
+# Wait for relay connection
+sleep 3
 
-# Get Mac IP address
-MAC_IP=$(ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -1)
+# Check relay status
 echo ""
-echo "WebSocket server running at:"
-echo "  - Local:      ws://localhost:8080"
-echo "  - Spectacles: ws://$MAC_IP:8080"
+echo "Checking relay connection..."
+curl -s https://spectacles-relay-xd16d6rhq1nd.deno.dev/status | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Relay: {d[\"summary\"][\"totalPairs\"]} pairs, {d[\"summary\"][\"activePairs\"]} active')" 2>/dev/null || echo "Could not check relay status"
+
+# Start Lens Studio preview
 echo ""
-
-
-echo "Opening Lens Studio project and clicking Preview..."
+echo "Starting Lens Studio preview..."
 "$SCRIPT_DIR/start-lens.sh"
 
 echo ""
 echo "=============================================="
-echo "Server is running. Press Ctrl+C to stop."
+echo "Server running. Press Ctrl+C to stop."
 echo "=============================================="
 
 # Wait for Ctrl+C

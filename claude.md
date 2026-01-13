@@ -9,7 +9,7 @@ Run the server:
 ./start-server-in-window.sh
 ```
 
-This launches the WebSocket server in a new Terminal window and waits for connections from Spectacles at IP 172.20.10.9.
+This launches the WebSocket server in a new Terminal window and waits for connections from your Spectacles device.
 
 ## Scripts
 

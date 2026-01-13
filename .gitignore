@@ -1,1 +1,6 @@
 .DS_Store
+
+# Local config files with secrets
+.env
+lens/Assets/config.local.ts
+lens/Assets/secrets.ts
