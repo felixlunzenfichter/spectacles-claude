@@ -55,36 +55,58 @@ def log(message):
 
 
 def get_git_diff():
-    """Get the git diff output for the spectacles-claude repository."""
+    """Get the git diff output for the spectacles-claude repository.
+
+    Runs the get-diff.sh script which provides comprehensive git status including:
+    - Branch status with ahead/behind count
+    - Unstaged and staged changes with function context
+    - Untracked files with their content
+    - Recent commit history with LOCAL/REMOTE markers
+    """
     try:
+        script_path = REPO_PATH / 'scripts' / 'get-diff.sh'
+        log(f"Running script: {script_path}")
         result = subprocess.run(
-            ['git', 'diff'],
+            [str(script_path)],
             cwd=REPO_PATH,
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=30
         )
+        log(f"Script result: returncode={result.returncode}, stdout_len={len(result.stdout)}, stderr={result.stderr[:100] if result.stderr else 'none'}")
         return result.stdout if result.returncode == 0 else None
     except Exception as e:
         log(f"Error getting git diff: {e}")
         return None
 
 
-async def send_git_diff():
+async def send_git_diff(force: bool = False):
     """Send the current git diff to Spectacles via relay."""
     global relay_connection, spectacles_connected, last_git_diff
+
+    log(f"send_git_diff called: force={force}, relay_connection={relay_connection is not None}, spectacles_connected={spectacles_connected}")
 
     if not relay_connection or not spectacles_connected:
         log("Cannot send git diff - no Spectacles connected via relay")
         return
 
+    log("Calling get_git_diff()...")
     diff_output = get_git_diff()
+    log(f"get_git_diff returned: {diff_output is not None}, length={len(diff_output) if diff_output else 0}")
+
     if diff_output is None:
         log("No git diff available")
         return
 
-    # Skip if diff is the same as last time
-    if diff_output == last_git_diff:
+    # Truncate to prevent overly large messages
+    MAX_DIFF_SIZE = 10000
+    if len(diff_output) > MAX_DIFF_SIZE:
+        original_len = len(diff_output)
+        diff_output = diff_output[:MAX_DIFF_SIZE] + "\n\n... (truncated)"
+        log(f"Git diff truncated from {original_len} to {MAX_DIFF_SIZE} chars")
+
+    # Skip if diff is the same as last time (unless forced)
+    if not force and diff_output == last_git_diff:
         log("Git diff unchanged, skipping")
         return
 
@@ -435,8 +457,9 @@ async def handle_relay_messages(websocket):
                     log(f"Sending init: {phase} - {color}")
                     await websocket.send(json.dumps(init_message))
 
-                    # Send git diff after init
-                    await send_git_diff()
+                    # Wait for handshake to complete before sending git diff
+                    await asyncio.sleep(1)
+                    await send_git_diff(force=True)
 
                 elif event == 'client_disconnected':
                     # Spectacles client disconnected from relay
@@ -473,8 +496,9 @@ async def handle_relay_messages(websocket):
                         log(f"Sending init: {phase} - {color}")
                         await websocket.send(json.dumps(init_message))
 
-                        # Send git diff after init
-                        await send_git_diff()
+                        # Wait for handshake to complete before sending git diff
+                        await asyncio.sleep(1)
+                        await send_git_diff(force=True)
 
                 elif event == 'server_disconnected':
                     log("Received server_disconnected (shouldn't happen, we are the server)")

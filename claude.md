@@ -13,9 +13,14 @@ This launches the WebSocket server in a new Terminal window and waits for connec
 
 ## Scripts
 
-- `start-server-in-window.sh` - Starts the WebSocket server in a new Terminal window
-- `start-server-and-preview.sh` - Starts server and opens Lens Studio preview
-- `start-lens.sh` - Lens Studio automation only
+| Script | What it does |
+|--------|--------------|
+| `start-server-in-window.sh` | **Websocket server** (Mac → Relay → Spectacles) - USE THIS |
+| `start-lens.sh` | Restarts Lens Studio app |
+| `start-preview.sh` | Opens Lens Studio preview panel |
+| `start-server-and-preview.sh` | Both server + preview |
+
+**Always use `./start-server-in-window.sh` to start the websocket server.**
 
 ## Communication
 
