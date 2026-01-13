@@ -13,6 +13,7 @@ import os
 import base64
 import io
 import hashlib
+import subprocess
 from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -40,11 +41,76 @@ location_data = None
 # Flag to track if Spectacles client is connected (via relay)
 spectacles_connected = False
 
+# Path to this repository for git diff
+REPO_PATH = Path(__file__).parent.resolve()
+
+# Store last git diff to avoid duplicates
+last_git_diff = None
+
 
 def log(message):
     """Print a timestamped log message."""
     timestamp = datetime.datetime.now().strftime('%H:%M:%S')
     print(f"[{timestamp}] {message}")
+
+
+def get_git_diff():
+    """Get the git diff output for the spectacles-claude repository."""
+    try:
+        result = subprocess.run(
+            ['git', 'diff'],
+            cwd=REPO_PATH,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        return result.stdout if result.returncode == 0 else None
+    except Exception as e:
+        log(f"Error getting git diff: {e}")
+        return None
+
+
+async def send_git_diff():
+    """Send the current git diff to Spectacles via relay."""
+    global relay_connection, spectacles_connected, last_git_diff
+
+    if not relay_connection or not spectacles_connected:
+        log("Cannot send git diff - no Spectacles connected via relay")
+        return
+
+    diff_output = get_git_diff()
+    if diff_output is None:
+        log("No git diff available")
+        return
+
+    # Skip if diff is the same as last time
+    if diff_output == last_git_diff:
+        log("Git diff unchanged, skipping")
+        return
+
+    last_git_diff = diff_output
+
+    message = {
+        'type': 'git_diff',
+        'data': diff_output
+    }
+
+    log("=" * 60)
+    log("SENDING GIT DIFF:")
+    log("=" * 60)
+    log(f"   Data length: {len(diff_output)} characters")
+    if diff_output:
+        preview = diff_output[:200].replace('\n', '\\n')
+        log(f"   Preview: {preview}...")
+    else:
+        log("   (empty diff - no uncommitted changes)")
+    log("=" * 60)
+
+    try:
+        await relay_connection.send(json.dumps(message))
+        log("   Git diff sent through relay")
+    except Exception as e:
+        log(f"   Failed to send git diff: {e}")
 
 
 async def fetch_sun_times(lat, lon):
@@ -197,6 +263,45 @@ class ClaudeConversationHandler(FileSystemEventHandler):
             )
 
 
+class RepoChangeHandler(FileSystemEventHandler):
+    """Handles file system events for the spectacles-claude repository."""
+
+    def __init__(self, loop):
+        self.loop = loop
+        self.debounce_task = None
+        super().__init__()
+
+    def on_any_event(self, event):
+        """Called on any file system event."""
+        if event.is_directory:
+            return
+
+        # Ignore .git directory changes
+        if '.git' in event.src_path:
+            return
+
+        # Ignore __pycache__ and other noise
+        if '__pycache__' in event.src_path or event.src_path.endswith('.pyc'):
+            return
+
+        log(f"Repo file changed: {Path(event.src_path).name}")
+
+        # Debounce: cancel previous task and schedule new one
+        if self.debounce_task:
+            self.debounce_task.cancel()
+
+        # Schedule sending git diff after a small delay (debounce)
+        self.debounce_task = asyncio.run_coroutine_threadsafe(
+            self._delayed_send_git_diff(),
+            self.loop
+        )
+
+    async def _delayed_send_git_diff(self):
+        """Send git diff after a short delay to debounce rapid changes."""
+        await asyncio.sleep(0.5)  # Wait 500ms for rapid changes to settle
+        await send_git_diff()
+
+
 async def send_text_message(message):
     """Send a text message through the relay to Spectacles."""
     global last_sent_message, relay_connection, spectacles_connected
@@ -330,6 +435,9 @@ async def handle_relay_messages(websocket):
                     log(f"Sending init: {phase} - {color}")
                     await websocket.send(json.dumps(init_message))
 
+                    # Send git diff after init
+                    await send_git_diff()
+
                 elif event == 'client_disconnected':
                     # Spectacles client disconnected from relay
                     spectacles_connected = False
@@ -364,6 +472,9 @@ async def handle_relay_messages(websocket):
                         }
                         log(f"Sending init: {phase} - {color}")
                         await websocket.send(json.dumps(init_message))
+
+                        # Send git diff after init
+                        await send_git_diff()
 
                 elif event == 'server_disconnected':
                     log("Received server_disconnected (shouldn't happen, we are the server)")
@@ -491,9 +602,12 @@ async def main():
     log("")
     log("=" * 60)
 
+    # Get the event loop for file watchers
+    loop = asyncio.get_event_loop()
+
     # Set up file watcher for Claude Code conversations
     claude_projects_path = Path.home() / '.claude' / 'projects'
-    observer = None
+    claude_observer = None
 
     if not claude_projects_path.exists():
         log(f"WARNING: Claude Code projects directory not found: {claude_projects_path}")
@@ -502,15 +616,22 @@ async def main():
         log(f"Monitoring Claude Code conversations in:")
         log(f"   {claude_projects_path}")
 
-        # Get the event loop
-        loop = asyncio.get_event_loop()
-
         # Create and start the observer
         event_handler = ClaudeConversationHandler(loop)
-        observer = Observer()
-        observer.schedule(event_handler, str(claude_projects_path), recursive=True)
-        observer.start()
-        log(f"File watcher started successfully")
+        claude_observer = Observer()
+        claude_observer.schedule(event_handler, str(claude_projects_path), recursive=True)
+        claude_observer.start()
+        log(f"Claude conversation watcher started successfully")
+
+    # Set up file watcher for repository changes (git diff)
+    repo_observer = None
+    log(f"Monitoring repository for git diff:")
+    log(f"   {REPO_PATH}")
+    repo_handler = RepoChangeHandler(loop)
+    repo_observer = Observer()
+    repo_observer.schedule(repo_handler, str(REPO_PATH), recursive=True)
+    repo_observer.start()
+    log(f"Repository watcher started successfully")
 
     log("=" * 60)
     log("")
@@ -525,9 +646,12 @@ async def main():
         log(f"FATAL ERROR: {e}")
         log(f"   Traceback: {traceback.format_exc()}")
     finally:
-        if observer:
-            observer.stop()
-            observer.join()
+        if claude_observer:
+            claude_observer.stop()
+            claude_observer.join()
+        if repo_observer:
+            repo_observer.stop()
+            repo_observer.join()
 
 
 if __name__ == "__main__":

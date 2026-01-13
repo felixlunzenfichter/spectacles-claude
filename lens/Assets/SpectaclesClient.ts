@@ -6,6 +6,9 @@ export class SpectaclesClient extends BaseScriptComponent {
     textComponent: Text;
 
     @input
+    gitDiffText: Text;
+
+    @input
     image: Image;
 
     // Build WebSocket URL for relay connection
@@ -25,6 +28,10 @@ export class SpectaclesClient extends BaseScriptComponent {
     private readonly MAX_DISPLAY_ROWS = 500;
     private readonly MAX_CONTENT_WIDTH = 100;
     private completeConversation: string[] = [];
+
+    // Git diff formatting constants
+    private readonly GIT_DIFF_LINE_WIDTH = 60;
+    private readonly GIT_DIFF_ROWS_PER_COLUMN = 100;
 
     onAwake() {
         print("ServerTextDisplay: Script initialized");
@@ -80,6 +87,11 @@ export class SpectaclesClient extends BaseScriptComponent {
                 print("ServerTextDisplay: Received text message");
                 // Display the text data
                 this.updateText(message.data);
+                break;
+
+            case "git_diff":
+                print("ServerTextDisplay: Received git_diff message");
+                this.updateGitDiffText(message.data);
                 break;
 
             case "jpeg":
@@ -195,16 +207,11 @@ export class SpectaclesClient extends BaseScriptComponent {
         if (!this.connected) {
             const currentTime = getTime();
 
-            // Update text only once per second
-            if (currentTime - this.lastPrintTime >= this.printDelay) {
-                const elapsed = currentTime - this.startTime;
-                this.updateText(`Waiting for server...\n${elapsed.toFixed(1)}s`);
-                this.lastPrintTime = currentTime;
-            }
-
-            // Try to reconnect every 10 seconds
+            // Try to reconnect every 3 seconds
             if (currentTime - this.lastReconnectAttempt >= this.reconnectDelay) {
                 print("ServerTextDisplay: Attempting to reconnect...");
+                const elapsed = currentTime - this.startTime;
+                this.updateText(`Reconnecting... (${elapsed.toFixed(0)}s)`);
                 this.lastReconnectAttempt = currentTime;
                 this.connectToServer();
             }
@@ -336,9 +343,70 @@ export class SpectaclesClient extends BaseScriptComponent {
     }
 
     updateColor(r: number, g: number, b: number, a: number) {
+        const color = new vec4(r, g, b, a);
         if (this.textComponent) {
-            this.textComponent.textFill.color = new vec4(r, g, b, a);
+            this.textComponent.textFill.color = color;
         }
+        if (this.gitDiffText) {
+            this.gitDiffText.textFill.color = color;
+        }
+    }
+
+    updateGitDiffText(newText: string) {
+        print("ServerTextDisplay: updateGitDiffText called with: " + newText);
+        if (this.gitDiffText) {
+            const formatted = this.formatGitDiff(newText);
+            this.gitDiffText.text = formatted;
+            print("ServerTextDisplay: Git diff text component updated successfully");
+        } else {
+            print("ServerTextDisplay: ERROR - Git diff text component not assigned!");
+        }
+    }
+
+    formatGitDiff(text: string): string {
+        const W = this.GIT_DIFF_LINE_WIDTH;
+        const ROWS = this.GIT_DIFF_ROWS_PER_COLUMN;
+
+        // Split text into lines
+        const lines = text.split('\n');
+
+        // Wrap each line that exceeds width
+        const wrapped: string[] = [];
+        for (const line of lines) {
+            if (line.length > W) {
+                // Chunk the line into pieces of width W
+                for (let i = 0; i < line.length; i += W) {
+                    wrapped.push(line.substring(i, i + W));
+                }
+            } else {
+                wrapped.push(line);
+            }
+        }
+
+        // Calculate number of columns needed
+        const numCols = Math.ceil(wrapped.length / ROWS);
+
+        // Split wrapped lines into columns
+        const cols: string[][] = [];
+        for (let i = 0; i < numCols; i++) {
+            cols.push(wrapped.slice(i * ROWS, (i + 1) * ROWS));
+        }
+
+        // Pad each column to ROWS length with empty strings
+        for (const col of cols) {
+            while (col.length < ROWS) {
+                col.push("");
+            }
+        }
+
+        // Build result by joining columns row by row
+        const resultLines: string[] = [];
+        for (let row = 0; row < ROWS; row++) {
+            const rowParts = cols.map(col => col[row].padEnd(W));
+            resultLines.push(rowParts.join(" \u2502 "));
+        }
+
+        return resultLines.join('\n');
     }
 
 }

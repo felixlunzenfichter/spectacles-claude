@@ -26,6 +26,7 @@
   ExportUid: 00000000-0000-0000-0000-000000000000
   PackagePolicy: CanBeUnpacked
   ScriptInputsHidden:
+    gitDiffText: false
     image: false
     textComponent: false
   ScriptTypesHidden:
@@ -38,10 +39,12 @@
     []
   DefaultScriptInputs:
     - textComponent: !<reference.Text> 00000000-0000-0000-0000-000000000000
+      gitDiffText: !<reference.Text> 00000000-0000-0000-0000-000000000000
       image: !<reference.Image> 00000000-0000-0000-0000-000000000000
   ScriptTypes:
     -
       {}
   InputLines:
     - // @input Component.Text textComponent
+    - // @input Component.Text gitDiffText
     - // @input Component.Image image
