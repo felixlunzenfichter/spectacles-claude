@@ -285,8 +285,9 @@ async def jpeg_screenshot_loop():
             await asyncio.sleep(1.0)
 
         except websockets.exceptions.ConnectionClosed:
-            log("Connection to relay lost during screenshot send")
-            break
+            log("Connection to relay lost during screenshot send, waiting for reconnection...")
+            await asyncio.sleep(1.0)
+            continue
         except Exception as e:
             log(f"Error in screenshot loop: {e}")
             await asyncio.sleep(1.0)
