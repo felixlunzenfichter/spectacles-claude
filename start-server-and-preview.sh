@@ -1,10 +1,15 @@
 #!/bin/bash
 
-echo "Starting Spectacles development environment..."
-echo "=============================================="
-
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+LOG_FILE="$SCRIPT_DIR/server.log"
+
+# Clear/truncate log file on each start
+> "$LOG_FILE"
+
+echo "Starting Spectacles development environment..."
+echo "=============================================="
+echo "Logging to: $LOG_FILE"
 
 # Kill any existing server
 pkill -f websocket_server.py 2>/dev/null
@@ -12,7 +17,7 @@ pkill -f websocket_server.py 2>/dev/null
 # Activate virtual environment and start the server in background
 echo "Connecting to relay server..."
 source "$SCRIPT_DIR/venv/bin/activate"
-python3 "$SCRIPT_DIR/websocket_server.py" &
+python3 -u "$SCRIPT_DIR/websocket_server.py" 2>&1 | tee -a "$LOG_FILE" &
 SERVER_PID=$!
 echo "Server started (PID: $SERVER_PID)"
 

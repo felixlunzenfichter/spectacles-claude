@@ -23,6 +23,8 @@ export class SpectaclesClient extends BaseScriptComponent {
     private lastPrintTime: number = 0;
     private printDelay: number = 1.0;  // Print status every 1 second
     private peerConnected: boolean = false;
+    private lastHelloTime: number = 0;
+    private helloCount: number = 0;
 
     private readonly MAX_ROWS_PER_COLUMN = 100;
     private readonly MAX_DISPLAY_ROWS = 500;
@@ -32,6 +34,7 @@ export class SpectaclesClient extends BaseScriptComponent {
     // Git diff formatting constants
     private readonly GIT_DIFF_LINE_WIDTH = 60;
     private readonly GIT_DIFF_ROWS_PER_COLUMN = 100;
+    private readonly MAX_GIT_DIFF_COLUMNS = 20;
 
     onAwake() {
         print("ServerTextDisplay: Script initialized");
@@ -57,9 +60,14 @@ export class SpectaclesClient extends BaseScriptComponent {
             case "relay_notification":
                 // Handle relay notifications about peer connection status
                 print("SpectaclesClient: Relay notification - " + message.event);
-                if (message.event === "peer_connected") {
+                if (message.event === "peer_connected" || message.event === "server_connected") {
                     this.peerConnected = true;
                     this.updateText("Mac connected to relay!");
+                    // Resend hello to trigger handshake
+                    if (this.socket && this.connected) {
+                        this.socket.send(JSON.stringify({ type: "hello" }));
+                        print("SpectaclesClient: Resent hello after peer connected");
+                    }
                 } else if (message.event === "peer_disconnected") {
                     this.peerConnected = false;
                     this.updateText("Mac disconnected from relay");
@@ -136,6 +144,9 @@ export class SpectaclesClient extends BaseScriptComponent {
                 print("SpectaclesClient: Connected to relay!");
                 this.connected = true;
                 this.updateText("Connected to relay, waiting for Mac...");
+                // Send hello message to initiate handshake
+                this.socket.send(JSON.stringify({ type: "hello" }));
+                print("SpectaclesClient: Sent hello message");
             };
 
             this.socket.onmessage = async (event) => {
@@ -214,6 +225,18 @@ export class SpectaclesClient extends BaseScriptComponent {
                 this.updateText(`Reconnecting... (${elapsed.toFixed(0)}s)`);
                 this.lastReconnectAttempt = currentTime;
                 this.connectToServer();
+            }
+        }
+
+        // If connected to relay but peer not connected, send hello every 3s
+        if (this.connected && !this.peerConnected) {
+            const currentTime = getTime();
+            if (currentTime - this.lastHelloTime >= 3.0) {
+                this.helloCount++;
+                this.socket.send(JSON.stringify({ type: "hello" }));
+                this.updateText(`Connected to relay\nWaiting for Mac...\nSending hello #${this.helloCount}`);
+                print("SpectaclesClient: Sending hello (waiting for Mac)");
+                this.lastHelloTime = currentTime;
             }
         }
     }
@@ -339,7 +362,9 @@ export class SpectaclesClient extends BaseScriptComponent {
             displayRows[i] += '|';
         }
 
-        return displayRows.join('\n');
+        const result = displayRows.join('\n');
+        print(`Conversation display: ${numColumns} columns x ${this.MAX_ROWS_PER_COLUMN} rows = ${result.length} chars`);
+        return result;
     }
 
     updateColor(r: number, g: number, b: number, a: number) {
@@ -355,15 +380,28 @@ export class SpectaclesClient extends BaseScriptComponent {
     updateGitDiffText(newText: string) {
         print("ServerTextDisplay: updateGitDiffText called with: " + newText);
         if (this.gitDiffText) {
-            const formatted = this.formatGitDiff(newText);
+            const { formatted, numCols, numRows } = this.formatGitDiff(newText);
             this.gitDiffText.text = formatted;
             print("ServerTextDisplay: Git diff text component updated successfully");
+
+            // Send display stats back to Mac
+            if (this.socket && this.connected) {
+                const stats = {
+                    type: "display_stats",
+                    panel: "git_diff",
+                    chars: formatted.length,
+                    columns: numCols,
+                    rows: numRows
+                };
+                this.socket.send(JSON.stringify(stats));
+                print("ServerTextDisplay: Sent display_stats to Mac");
+            }
         } else {
             print("ServerTextDisplay: ERROR - Git diff text component not assigned!");
         }
     }
 
-    formatGitDiff(text: string): string {
+    formatGitDiff(text: string): { formatted: string, numCols: number, numRows: number } {
         const W = this.GIT_DIFF_LINE_WIDTH;
         const ROWS = this.GIT_DIFF_ROWS_PER_COLUMN;
 
@@ -383,13 +421,16 @@ export class SpectaclesClient extends BaseScriptComponent {
             }
         }
 
-        // Calculate number of columns needed
-        const numCols = Math.ceil(wrapped.length / ROWS);
+        // Calculate number of columns needed, capped at max
+        const numCols = Math.min(Math.ceil(wrapped.length / ROWS), this.MAX_GIT_DIFF_COLUMNS);
+
+        // Only take the first (numCols * ROWS) wrapped lines
+        const displayWrapped = wrapped.slice(0, numCols * ROWS);
 
         // Split wrapped lines into columns
         const cols: string[][] = [];
         for (let i = 0; i < numCols; i++) {
-            cols.push(wrapped.slice(i * ROWS, (i + 1) * ROWS));
+            cols.push(displayWrapped.slice(i * ROWS, (i + 1) * ROWS));
         }
 
         // Pad each column to ROWS length with empty strings
@@ -403,10 +444,16 @@ export class SpectaclesClient extends BaseScriptComponent {
         const resultLines: string[] = [];
         for (let row = 0; row < ROWS; row++) {
             const rowParts = cols.map(col => col[row].padEnd(W));
-            resultLines.push(rowParts.join(" \u2502 "));
+            const rowWidths = rowParts.map(p => p.length);
+            if (row < 5) {
+                print(`Row ${row}: widths=[${rowWidths.join(',')}] total=${rowParts.join('  ').length}`);
+            }
+            resultLines.push(rowParts.join("  "));
         }
 
-        return resultLines.join('\n');
+        const result = resultLines.join('\n');
+        print(`GitDiff display: ${numCols} columns x ${ROWS} rows = ${result.length} chars`);
+        return { formatted: result, numCols: numCols, numRows: ROWS };
     }
 
 }

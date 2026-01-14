@@ -48,6 +48,69 @@ REPO_PATH = Path(__file__).parent.resolve()
 last_git_diff = None
 
 
+def sanitize_to_ascii(text):
+    """Replace or remove non-ASCII characters from text.
+
+    Replaces common unicode symbols with ASCII equivalents,
+    and replaces any remaining non-ASCII characters with '?'.
+    Keeps only printable ASCII (32-126) plus newlines and tabs.
+    """
+    # Replace common unicode with ASCII equivalents
+    replacements = {
+        '│': '|',
+        '─': '-',
+        '┌': '+',
+        '└': '+',
+        '┐': '+',
+        '┘': '+',
+        '├': '+',
+        '┤': '+',
+        '┬': '+',
+        '┴': '+',
+        '┼': '+',
+        '"': '"',
+        '"': '"',
+        ''': "'",
+        ''': "'",
+        '—': '--',
+        '–': '-',
+        '…': '...',
+        '•': '*',
+        '→': '->',
+        '←': '<-',
+        '↑': '^',
+        '↓': 'v',
+        '≤': '<=',
+        '≥': '>=',
+        '≠': '!=',
+        '×': 'x',
+        '÷': '/',
+        '±': '+/-',
+        '°': ' deg',
+        '©': '(c)',
+        '®': '(R)',
+        '™': '(TM)',
+        '\u00a0': ' ',  # Non-breaking space
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+
+    # Replace remaining non-ASCII with ? and filter to printable ASCII
+    result = []
+    for c in text:
+        code = ord(c)
+        if code < 128:
+            # Keep printable ASCII (32-126), newlines, tabs, and carriage returns
+            if 32 <= code <= 126 or c in '\n\t\r':
+                result.append(c)
+            # Skip other control characters
+        else:
+            # Replace non-ASCII with ?
+            result.append('?')
+
+    return ''.join(result)
+
+
 def log(message):
     """Print a timestamped log message."""
     timestamp = datetime.datetime.now().strftime('%H:%M:%S')
@@ -71,10 +134,15 @@ def get_git_diff():
             cwd=REPO_PATH,
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             timeout=30
         )
         log(f"Script result: returncode={result.returncode}, stdout_len={len(result.stdout)}, stderr={result.stderr[:100] if result.stderr else 'none'}")
-        return result.stdout if result.returncode == 0 else None
+        if result.returncode == 0:
+            # Sanitize output to ASCII-only characters
+            return sanitize_to_ascii(result.stdout)
+        return None
     except Exception as e:
         log(f"Error getting git diff: {e}")
         return None
@@ -97,13 +165,6 @@ async def send_git_diff(force: bool = False):
     if diff_output is None:
         log("No git diff available")
         return
-
-    # Truncate to prevent overly large messages
-    MAX_DIFF_SIZE = 10000
-    if len(diff_output) > MAX_DIFF_SIZE:
-        original_len = len(diff_output)
-        diff_output = diff_output[:MAX_DIFF_SIZE] + "\n\n... (truncated)"
-        log(f"Git diff truncated from {original_len} to {MAX_DIFF_SIZE} chars")
 
     # Skip if diff is the same as last time (unless forced)
     if not force and diff_output == last_git_diff:
@@ -506,9 +567,49 @@ async def handle_relay_messages(websocket):
                 else:
                     log(f"Unknown relay notification event: {event}")
 
+            elif msg_type == 'hello':
+                # Hello message from Spectacles - initiate handshake
+                spectacles_connected = True
+                log("=" * 60)
+                log("SPECTACLES SENT HELLO - INITIATING HANDSHAKE")
+                log("=" * 60)
+
+                # Send initialization message
+                color, phase = get_sun_phase_color(sun_times_data) if sun_times_data else ((1.0, 0.0, 0.0, 1.0), "night")
+                init_message = {
+                    'type': 'init',
+                    'width': 2048,
+                    'height': 1152,
+                    'color': {
+                        'r': color[0],
+                        'g': color[1],
+                        'b': color[2],
+                        'a': color[3]
+                    },
+                    'last_message': last_sent_message if last_sent_message else None
+                }
+                log(f"Sending init: {phase} - {color}")
+                await websocket.send(json.dumps(init_message))
+
+                # Send git diff immediately after init
+                await send_git_diff(force=True)
+
             elif msg_type == 'ack':
                 # Acknowledgment from Spectacles (forwarded by relay)
                 log(f"Received ack from Spectacles")
+
+            elif msg_type == 'display_stats':
+                # Display statistics from Spectacles
+                panel = data.get('panel', 'unknown')
+                chars = data.get('chars', 0)
+                columns = data.get('columns', 0)
+                rows = data.get('rows', 0)
+                log("=" * 60)
+                log(f"DISPLAY STATS FROM SPECTACLES ({panel}):")
+                log(f"   Columns: {columns}")
+                log(f"   Rows: {rows}")
+                log(f"   Total chars: {chars}")
+                log("=" * 60)
 
             elif msg_type == 'error':
                 log(f"Error from relay: {data.get('message', 'Unknown error')}")
@@ -525,6 +626,27 @@ async def handle_relay_messages(websocket):
                 log(f"Received non-JSON message: {message[:100]}")
         except Exception as e:
             log(f"Error handling relay message: {e}")
+
+
+async def ping_watchdog(websocket):
+    """Detect dead connections quickly with ping/pong.
+
+    Sends ping every 5 seconds and expects pong within 3 seconds.
+    If pong not received, connection is considered dead and closed.
+    This detects dead connections within 8 seconds instead of hanging forever.
+    """
+    while True:
+        try:
+            await asyncio.sleep(5)
+            pong = await websocket.ping()
+            await asyncio.wait_for(pong, timeout=3)
+        except asyncio.CancelledError:
+            # Task was cancelled (e.g., connection closed normally)
+            return
+        except Exception as e:
+            log(f"Ping failed, connection dead: {e}")
+            await websocket.close()
+            return
 
 
 async def connect_to_relay():
@@ -559,8 +681,13 @@ async def connect_to_relay():
                 log("   Waiting for Spectacles to connect...")
                 log("=" * 60)
 
-                # Handle incoming messages from relay
-                await handle_relay_messages(websocket)
+                # Run message handler and ping watchdog concurrently
+                # ping_watchdog detects dead connections within 8 seconds
+                await asyncio.gather(
+                    handle_relay_messages(websocket),
+                    ping_watchdog(websocket),
+                    return_exceptions=True
+                )
 
         except websockets.exceptions.ConnectionClosed as e:
             log(f"Connection to relay closed: {e}")
@@ -660,30 +787,51 @@ async def main():
     log("=" * 60)
     log("")
 
-    try:
-        # Start both the relay connection and screenshot loop concurrently
-        await asyncio.gather(
-            connect_to_relay(),
-            jpeg_screenshot_loop()
-        )
-    except Exception as e:
-        log(f"FATAL ERROR: {e}")
-        log(f"   Traceback: {traceback.format_exc()}")
-    finally:
-        if claude_observer:
-            claude_observer.stop()
-            claude_observer.join()
-        if repo_observer:
-            repo_observer.stop()
-            repo_observer.join()
+    # Main loop - never exit, always retry
+    while True:
+        try:
+            # Start both the relay connection and screenshot loop concurrently
+            await asyncio.gather(
+                connect_to_relay(),
+                jpeg_screenshot_loop()
+            )
+        except asyncio.CancelledError:
+            log("Tasks cancelled, shutting down...")
+            break
+        except Exception as e:
+            log(f"ERROR in main loop: {e}")
+            log(f"   Traceback: {traceback.format_exc()}")
+            log(f"Restarting main loop in {RECONNECT_DELAY} seconds...")
+            await asyncio.sleep(RECONNECT_DELAY)
+            # Continue the while loop to restart
+            continue
+
+    # Cleanup only happens on graceful shutdown
+    if claude_observer:
+        claude_observer.stop()
+        claude_observer.join()
+    if repo_observer:
+        repo_observer.stop()
+        repo_observer.join()
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        log("")
-        log("SERVER STOPPED by user (Ctrl+C)")
-    except Exception as e:
-        log(f"UNEXPECTED ERROR: {e}")
-        log(f"   Traceback: {traceback.format_exc()}")
+    # Outer loop - never exit unless Ctrl+C
+    while True:
+        try:
+            asyncio.run(main())
+            # If main() returns normally, restart
+            log("main() returned, restarting in 5 seconds...")
+            import time
+            time.sleep(5)
+        except KeyboardInterrupt:
+            log("")
+            log("SERVER STOPPED by user (Ctrl+C)")
+            break  # Only exit on Ctrl+C
+        except Exception as e:
+            log(f"UNEXPECTED ERROR: {e}")
+            log(f"   Traceback: {traceback.format_exc()}")
+            log(f"Restarting entire server in {RECONNECT_DELAY} seconds...")
+            import time
+            time.sleep(RECONNECT_DELAY)
+            # Continue to restart
