@@ -25,6 +25,8 @@ export class SpectaclesClient extends BaseScriptComponent {
     private peerConnected: boolean = false;
     private lastHelloTime: number = 0;
     private helloCount: number = 0;
+    private connectionAttemptCount: number = 0;
+    private messageReceivedCount: number = 0;
 
     private readonly MAX_ROWS_PER_COLUMN = 100;
     private readonly MAX_DISPLAY_ROWS = 500;
@@ -128,7 +130,16 @@ export class SpectaclesClient extends BaseScriptComponent {
             return;
         }
 
-        print("SpectaclesClient: Connecting to relay at " + this.relayWsUrl);
+        this.connectionAttemptCount++;
+        const timestamp = new Date().toISOString();
+        print("");
+        print("************************************************************");
+        print("************************************************************");
+        print("***  SPECTACLES CONNECTION ATTEMPT #" + this.connectionAttemptCount + "  ***");
+        print("************************************************************");
+        print("   Timestamp: " + timestamp);
+        print("   Relay URL: " + this.relayWsUrl);
+        print("************************************************************");
 
         try {
             // Create WebSocket connection directly to relay
@@ -136,45 +147,92 @@ export class SpectaclesClient extends BaseScriptComponent {
 
             // Set up event handlers
             this.socket.onopen = (event) => {
-                print("SpectaclesClient: Connected to relay!");
+                const openTimestamp = new Date().toISOString();
+                print("");
+                print("************************************************************");
+                print("***  SOCKET OPENED SUCCESSFULLY  ***");
+                print("************************************************************");
+                print("   Open timestamp: " + openTimestamp);
+                print("   Connection attempt #: " + this.connectionAttemptCount);
+                print("   Socket readyState: " + this.socket.readyState);
+                print("************************************************************");
                 this.connected = true;
                 this.updateText("Connected to relay, waiting for Mac...");
                 // Send hello message to initiate handshake
                 this.socket.send(JSON.stringify({ type: "hello" }));
-                print("SpectaclesClient: Sent hello message");
+                print("SpectaclesClient: Sent hello message after socket open");
             };
 
             this.socket.onmessage = async (event) => {
+                this.messageReceivedCount++;
+                const msgTimestamp = new Date().toISOString();
+                print("");
+                print("************************************************************");
+                print("***  MESSAGE RECEIVED #" + this.messageReceivedCount + "  ***");
+                print("************************************************************");
+                print("   Timestamp: " + msgTimestamp);
+
                 let messageText: string;
                 if (event.data instanceof Blob) {
+                    print("   Data type: Blob");
                     messageText = await event.data.text();
                 } else {
+                    print("   Data type: " + typeof event.data);
                     messageText = event.data;
                 }
 
+                print("   Raw data length: " + messageText.length);
+                print("   Raw data preview: " + messageText.substring(0, 200));
+                print("************************************************************");
+
                 try {
                     const message = JSON.parse(messageText);
+                    print("   Parsed message type: " + message.type);
                     this.processJSONMessage(message);
                 } catch (error) {
                     print("SpectaclesClient: Error parsing message: " + error);
+                    print("SpectaclesClient: Raw message was: " + messageText.substring(0, 500));
                 }
             };
 
             this.socket.onerror = (event) => {
-                print("SpectaclesClient: WebSocket error occurred");
-                print("SpectaclesClient: Error event details: " + JSON.stringify(event));
-                print("SpectaclesClient: Relay URL: " + this.relayWsUrl);
-                print("SpectaclesClient: Socket state: " + (this.socket ? this.socket.readyState : "null"));
+                const errTimestamp = new Date().toISOString();
+                print("");
+                print("************************************************************");
+                print("************************************************************");
+                print("***  SOCKET ERROR OCCURRED  ***");
+                print("************************************************************");
+                print("************************************************************");
+                print("   Error timestamp: " + errTimestamp);
+                print("   Connection attempt #: " + this.connectionAttemptCount);
+                print("   Error event details: " + JSON.stringify(event));
+                print("   Relay URL: " + this.relayWsUrl);
+                print("   Socket state: " + (this.socket ? this.socket.readyState : "null"));
+                print("   Was connected: " + this.connected);
+                print("   Peer was connected: " + this.peerConnected);
+                print("************************************************************");
                 this.connected = false;
                 this.peerConnected = false;
                 this.updateText("Connection error!");
             };
 
             this.socket.onclose = (event) => {
-                print("SpectaclesClient: WebSocket closed");
-                print("SpectaclesClient: Close code: " + event.code);
-                print("SpectaclesClient: Close reason: " + event.reason);
-                print("SpectaclesClient: Was clean: " + event.wasClean);
+                const closeTimestamp = new Date().toISOString();
+                print("");
+                print("************************************************************");
+                print("************************************************************");
+                print("***  SOCKET CLOSED  ***");
+                print("************************************************************");
+                print("************************************************************");
+                print("   Close timestamp: " + closeTimestamp);
+                print("   Connection attempt #: " + this.connectionAttemptCount);
+                print("   Close code: " + event.code);
+                print("   Close reason: " + (event.reason || "(empty)"));
+                print("   Was clean close: " + event.wasClean);
+                print("   Was connected before close: " + this.connected);
+                print("   Peer was connected: " + this.peerConnected);
+                print("   Messages received this session: " + this.messageReceivedCount);
+                print("************************************************************");
                 this.connected = false;
                 this.peerConnected = false;
                 this.socket = null;

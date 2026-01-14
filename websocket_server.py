@@ -570,9 +570,16 @@ async def handle_relay_messages(websocket):
             elif msg_type == 'hello':
                 # Hello message from Spectacles - initiate handshake
                 spectacles_connected = True
-                log("=" * 60)
-                log("SPECTACLES SENT HELLO - INITIATING HANDSHAKE")
-                log("=" * 60)
+                log("")
+                log("*" * 60)
+                log("*" * 60)
+                log("***  HELLO RECEIVED FROM SPECTACLES  ***")
+                log("*" * 60)
+                log("*" * 60)
+                log(f"   Raw message: {message}")
+                log(f"   Timestamp: {datetime.datetime.now().isoformat()}")
+                log("   INITIATING HANDSHAKE...")
+                log("*" * 60)
 
                 # Send initialization message
                 color, phase = get_sun_phase_color(sun_times_data) if sun_times_data else ((1.0, 0.0, 0.0, 1.0), "night")
