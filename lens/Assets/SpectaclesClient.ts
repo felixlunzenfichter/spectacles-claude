@@ -58,17 +58,9 @@ export class SpectaclesClient extends BaseScriptComponent {
         // Handle message based on type
         switch (message.type) {
             case "relay_notification":
-                // Handle relay notifications about peer connection status
+                // Just log relay notifications - hello is sent every 3s anyway
                 print("SpectaclesClient: Relay notification - " + message.event);
-                if (message.event === "peer_connected" || message.event === "server_connected") {
-                    this.peerConnected = true;
-                    this.updateText("Mac connected to relay!");
-                    // Resend hello to trigger handshake
-                    if (this.socket && this.connected) {
-                        this.socket.send(JSON.stringify({ type: "hello" }));
-                        print("SpectaclesClient: Resent hello after peer connected");
-                    }
-                } else if (message.event === "peer_disconnected") {
+                if (message.event === "peer_disconnected") {
                     this.peerConnected = false;
                     this.updateText("Mac disconnected from relay");
                 }
@@ -76,6 +68,9 @@ export class SpectaclesClient extends BaseScriptComponent {
 
             case "init":
                 print("ServerTextDisplay: Received init message");
+
+                // Mac has responded - peer is now connected
+                this.peerConnected = true;
 
                 // Set color
                 const color = message.color;
@@ -446,9 +441,9 @@ export class SpectaclesClient extends BaseScriptComponent {
             const rowParts = cols.map(col => col[row].padEnd(W));
             const rowWidths = rowParts.map(p => p.length);
             if (row < 5) {
-                print(`Row ${row}: widths=[${rowWidths.join(',')}] total=${rowParts.join('  ').length}`);
+                print(`Row ${row}: widths=[${rowWidths.join(',')}] total=${rowParts.join(' | ').length}`);
             }
-            resultLines.push(rowParts.join("  "));
+            resultLines.push(rowParts.join(" | "));
         }
 
         const result = resultLines.join('\n');
