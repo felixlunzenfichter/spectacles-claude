@@ -4,3 +4,12 @@
 .env
 lens/Assets/config.local.ts
 lens/Assets/secrets.ts
+
+# Runtime files
+server.log
+__pycache__/
+*.pyc
+
+# IDE/Editor caches
+lens/Cache/
+.claude/

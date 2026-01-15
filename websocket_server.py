@@ -6,6 +6,7 @@ Sends screen content to connected Spectacles in real-time.
 
 import asyncio
 import websockets
+import aiohttp
 import datetime
 import traceback
 import json
@@ -26,7 +27,7 @@ load_dotenv()
 # Relay server configuration
 RELAY_URL = os.environ.get("RELAY_URL", "https://spectacles-relay-qbeff114ve4r.deno.dev")
 DEVICE_SECRET = os.environ.get("DEVICE_SECRET", "")
-RECONNECT_DELAY = 5  # seconds between reconnection attempts
+RECONNECT_DELAY = 10  # seconds between reconnection attempts
 
 # Store the WebSocket connection to relay
 relay_connection = None
@@ -635,24 +636,28 @@ async def handle_relay_messages(websocket):
             log(f"Error handling relay message: {e}")
 
 
-async def ping_watchdog(websocket):
-    """Detect dead connections quickly with ping/pong.
+async def check_relay_status(websocket):
+    """Periodically send application-level ping to verify relay connection."""
+    global relay_connection
 
-    Sends ping every 5 seconds and expects pong within 3 seconds.
-    If pong not received, connection is considered dead and closed.
-    This detects dead connections within 8 seconds instead of hanging forever.
-    """
     while True:
+        await asyncio.sleep(10)  # Check every 10 seconds
+
         try:
-            await asyncio.sleep(5)
-            pong = await websocket.ping()
-            await asyncio.wait_for(pong, timeout=3)
+            # Send application-level ping through WebSocket
+            ping_msg = json.dumps({"type": "ping", "timestamp": datetime.datetime.now().isoformat()})
+            await websocket.send(ping_msg)
+            log("PING: Sent application ping - connection alive")
+
         except asyncio.CancelledError:
-            # Task was cancelled (e.g., connection closed normally)
             return
         except Exception as e:
-            log(f"Ping failed, connection dead: {e}")
-            await websocket.close()
+            log(f"PING FAILED: {e} - connection may be dead")
+            # If we can't send, connection is likely dead
+            try:
+                await websocket.close(1000, "Ping failed")
+            except:
+                pass
             return
 
 
@@ -675,9 +680,9 @@ async def connect_to_relay():
         try:
             async with websockets.connect(
                 ws_url,
-                ping_interval=30,
-                ping_timeout=10,
-                close_timeout=5
+                close_timeout=5,
+                ping_interval=10,  # Send ping every 10 seconds
+                ping_timeout=5,    # Wait 5 seconds for pong before considering dead
             ) as websocket:
                 relay_connection = websocket
                 log("=" * 60)
@@ -688,11 +693,10 @@ async def connect_to_relay():
                 log("   Waiting for Spectacles to connect...")
                 log("=" * 60)
 
-                # Run message handler and ping watchdog concurrently
-                # ping_watchdog detects dead connections within 8 seconds
+                # Run message handler AND status checker concurrently
                 await asyncio.gather(
                     handle_relay_messages(websocket),
-                    ping_watchdog(websocket),
+                    check_relay_status(websocket),
                     return_exceptions=True
                 )
 
