@@ -111,10 +111,18 @@ def sanitize_to_ascii(text):
     return ''.join(result)
 
 
+LOG_FILE = Path("/tmp/spectacles-server.log")
+
 def log(message):
-    """Print a timestamped log message."""
+    """Print a timestamped log message to stdout and file."""
     timestamp = datetime.datetime.now().strftime('%H:%M:%S')
-    print(f"[{timestamp}] {message}")
+    line = f"[{timestamp}] {message}"
+    print(line)
+    try:
+        with open(LOG_FILE, "a") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
 
 
 def get_git_diff():
@@ -680,8 +688,8 @@ async def start_server():
         handle_client,
         "0.0.0.0",
         SERVER_PORT,
-        ping_interval=10,
-        ping_timeout=5,
+        ping_interval=None,  # Disable ping - Spectacles doesn't respond to pings
+        ping_timeout=None,
     ) as server:
         log(f"WebSocket server listening on port {SERVER_PORT}")
         await asyncio.Future()  # Run forever
