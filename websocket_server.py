@@ -437,9 +437,11 @@ class RepoChangeHandler(FileSystemEventHandler):
         if event.is_directory:
             return
 
-        # Ignore .git directory changes
+        # Detect .git/index changes (staging) but ignore other .git noise
         if '.git' in event.src_path:
-            return
+            if not event.src_path.endswith('.git/index'):
+                return
+            log(f"Git index changed (staging operation detected)")
 
         # Ignore __pycache__ and other noise
         if '__pycache__' in event.src_path or event.src_path.endswith('.pyc'):

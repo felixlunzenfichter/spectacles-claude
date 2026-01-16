@@ -3,7 +3,9 @@ cd "$(dirname "$0")/.."
 
 # Branch status with ahead/behind count
 echo "=== Branch Status ==="
-git status -sb
+# Get repo name and combine with branch status
+repo_name=$(basename -s .git "$(git config --get remote.origin.url)" 2>/dev/null || basename "$(pwd)")
+git status -sb | sed "s/^## /$repo_name\//"
 echo ""
 
 # Unstaged changes
