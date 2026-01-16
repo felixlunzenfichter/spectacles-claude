@@ -13,6 +13,7 @@ import json
 import os
 import base64
 import io
+import time
 import hashlib
 import subprocess
 from pathlib import Path
@@ -41,8 +42,8 @@ location_data = None
 # Flag to track if Spectacles client is connected
 spectacles_connected = False
 
-# Path to this repository for git diff
-REPO_PATH = Path(__file__).parent.resolve()
+# Path to this script's directory (for finding get-diff.sh)
+SCRIPT_DIR = Path(__file__).parent.resolve()
 
 # Git diff cache file path
 GIT_DIFF_CACHE_FILE = Path("/tmp/spectacles-git-diff.txt")
@@ -135,11 +136,10 @@ def get_git_diff():
     - Recent commit history with LOCAL/REMOTE markers
     """
     try:
-        script_path = REPO_PATH / 'scripts' / 'get-diff.sh'
+        script_path = SCRIPT_DIR / 'scripts' / 'get-diff.sh'
         log(f"Running script: {script_path}")
         result = subprocess.run(
             [str(script_path)],
-            cwd=REPO_PATH,
             capture_output=True,
             text=True,
             encoding='utf-8',
@@ -217,13 +217,49 @@ def format_git_diff_for_display(text: str) -> str:
     return result
 
 
+# Cache fingerprint to avoid running full diff script when nothing changed
+_last_fingerprint_hash = None
+
+
+def get_repo_fingerprint():
+    """Get quick fingerprint of repo state (HEAD + status)."""
+    try:
+        # Read target repo from config
+        config_file = Path.home() / ".spectacles-repo"
+        if config_file.exists():
+            repo_path = config_file.read_text().strip()
+        else:
+            return None
+
+        # Quick commands: HEAD hash + porcelain status
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_path, capture_output=True, text=True, timeout=5
+        )
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=repo_path, capture_output=True, text=True, timeout=5
+        )
+
+        fingerprint = head.stdout + status.stdout
+        return hashlib.md5(fingerprint.encode()).hexdigest()
+    except Exception:
+        return None
+
+
 async def send_git_diff(force: bool = False):
     """Send the current git diff to Spectacles."""
-    global client_connection, spectacles_connected
+    global client_connection, spectacles_connected, _last_fingerprint_hash
+
+    # Check fingerprint first (fast) - skip if unchanged
+    fingerprint = get_repo_fingerprint()
+    if not force and fingerprint and fingerprint == _last_fingerprint_hash:
+        return  # Silent skip - nothing changed
+    _last_fingerprint_hash = fingerprint
 
     log(f"send_git_diff called: force={force}")
 
-    # 1. Get raw diff
+    # 1. Get raw diff (only runs if fingerprint changed)
     diff_output = get_git_diff()
     if diff_output is None:
         log("No git diff available")
@@ -417,52 +453,16 @@ class ClaudeConversationHandler(FileSystemEventHandler):
         message = extract_latest_event(event.src_path)
 
         if message:
-            # Schedule sending the message to Spectacles
+            # Schedule sending the message and git diff to Spectacles
             asyncio.run_coroutine_threadsafe(
                 send_text_message(message),
                 self.loop
             )
-
-
-class RepoChangeHandler(FileSystemEventHandler):
-    """Handles file system events for the spectacles-claude repository."""
-
-    def __init__(self, loop):
-        self.loop = loop
-        self.debounce_task = None
-        super().__init__()
-
-    def on_any_event(self, event):
-        """Called on any file system event."""
-        if event.is_directory:
-            return
-
-        # Detect .git/index changes (staging) but ignore other .git noise
-        if '.git' in event.src_path:
-            if not event.src_path.endswith('.git/index'):
-                return
-            log(f"Git index changed (staging operation detected)")
-
-        # Ignore __pycache__ and other noise
-        if '__pycache__' in event.src_path or event.src_path.endswith('.pyc'):
-            return
-
-        log(f"Repo file changed: {Path(event.src_path).name}")
-
-        # Debounce: cancel previous task and schedule new one
-        if self.debounce_task:
-            self.debounce_task.cancel()
-
-        # Schedule sending git diff after a small delay (debounce)
-        self.debounce_task = asyncio.run_coroutine_threadsafe(
-            self._delayed_send_git_diff(),
-            self.loop
-        )
-
-    async def _delayed_send_git_diff(self):
-        """Send git diff after a short delay to debounce rapid changes."""
-        await asyncio.sleep(0.5)  # Wait 500ms for rapid changes to settle
-        await send_git_diff()
+            # Also refresh git diff (already deduped via cache file)
+            asyncio.run_coroutine_threadsafe(
+                send_git_diff(),
+                self.loop
+            )
 
 
 async def send_text_message(message):
@@ -759,22 +759,7 @@ async def main():
         claude_observer.start()
         log(f"Claude conversation watcher started successfully")
 
-    # Set up file watcher for repository changes (git diff)
-    repo_observer = None
-    log(f"Monitoring repository for git diff:")
-    log(f"   {REPO_PATH}")
-    repo_handler = RepoChangeHandler(loop)
-    repo_observer = Observer()
-    repo_observer.schedule(repo_handler, str(REPO_PATH), recursive=True)
-    # Also watch .git directory to catch staging/commit operations
-    git_dir = REPO_PATH / '.git'
-    if git_dir.exists():
-        repo_observer.schedule(repo_handler, str(git_dir), recursive=True)
-        log(f"   {git_dir} (for git operations)")
-    repo_observer.start()
-    log(f"Repository watcher started successfully")
-
-    # Manual trigger on startup (like chokidar ignoreInitial: false)
+    # Trigger initial git diff on startup
     log("Triggering initial git diff...")
     asyncio.run_coroutine_threadsafe(send_git_diff(force=True), loop)
 
@@ -804,9 +789,6 @@ async def main():
     if claude_observer:
         claude_observer.stop()
         claude_observer.join()
-    if repo_observer:
-        repo_observer.stop()
-        repo_observer.join()
 
 
 if __name__ == "__main__":

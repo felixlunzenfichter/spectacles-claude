@@ -1,5 +1,15 @@
 #!/bin/bash
-cd "$(dirname "$0")/.."
+# Read target repo from config file (one line: path to repo)
+CONFIG_FILE="$HOME/.spectacles-repo"
+
+if [ -f "$CONFIG_FILE" ]; then
+    REPO_PATH=$(cat "$CONFIG_FILE")
+else
+    # Default to current directory
+    REPO_PATH="$(pwd)"
+fi
+
+cd "$REPO_PATH" || exit 1
 
 # Branch status with ahead/behind count
 echo "=== Branch Status ==="
