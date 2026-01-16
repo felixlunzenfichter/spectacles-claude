@@ -26,8 +26,10 @@
   ExportUid: 00000000-0000-0000-0000-000000000000
   PackagePolicy: CanBeUnpacked
   ScriptInputsHidden:
+    gitDiffParent: false
     gitDiffText: false
     image: false
+    referenceFont: false
     textComponent: false
   ScriptTypesHidden:
     {}
@@ -41,6 +43,8 @@
     - textComponent: !<reference.Text> 00000000-0000-0000-0000-000000000000
       gitDiffText: !<reference.Text> 00000000-0000-0000-0000-000000000000
       image: !<reference.Image> 00000000-0000-0000-0000-000000000000
+      gitDiffParent: !<reference.SceneObject> 00000000-0000-0000-0000-000000000000
+      referenceFont: !<reference.Font> 00000000-0000-0000-0000-000000000000
   ScriptTypes:
     -
       {}
@@ -48,3 +52,5 @@
     - // @input Component.Text textComponent
     - // @input Component.Text gitDiffText
     - // @input Component.Image image
+    - // @input SceneObject gitDiffParent
+    - // @input Asset.Font referenceFont

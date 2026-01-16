@@ -53,26 +53,6 @@ git log --all -10 --format="%H|%ad %s %h" --date=format:'%b %d %H:%M' | while IF
     echo "$commit_line"
 done
 
-# Latest 3 commits content with LOCAL/REMOTE markers
-echo "=== Latest 3 Commits Content ==="
-local_head=$(git rev-parse HEAD)
-
-# Get the last 3 commit hashes with dates from all refs (local and remote)
-commits=$(git log --all -3 --format="%H|%ad" --date=format:'%b %d %H:%M')
-
-index=0
-echo "$commits" | while IFS='|' read -r commit_hash commit_date; do
-    # Check if this commit is reachable from local HEAD
-    if git merge-base --is-ancestor "$commit_hash" "$local_head" 2>/dev/null; then
-        marker="LOCAL"
-    else
-        marker="REMOTE"
-    fi
-
-    echo ""
-    echo "=== Commit (HEAD~$index) ($commit_date) === $marker"
-    git show --function-context "$commit_hash"
-    echo ""
-
-    index=$((index + 1))
-done
+# Latest 3 commits (message only, no diff)
+echo "=== Recent Commits ==="
+git log -3 --format="%h %ad %s" --date=format:'%b %d %H:%M'

@@ -44,8 +44,8 @@ spectacles_connected = False
 # Path to this repository for git diff
 REPO_PATH = Path(__file__).parent.resolve()
 
-# Store last git diff to avoid duplicates
-last_git_diff = None
+# Git diff cache file path
+GIT_DIFF_CACHE_FILE = Path("/tmp/spectacles-git-diff.txt")
 
 
 def sanitize_to_ascii(text):
@@ -148,45 +148,115 @@ def get_git_diff():
         return None
 
 
+def format_git_diff_for_display(text: str) -> str:
+    """Format git diff into multi-column layout for Spectacles display.
+
+    Algorithm:
+    - Line width: 100 chars
+    - Min rows per column: 100
+    - Max columns: 20
+    - If content exceeds 20 cols × 100 rows, increase rows to fit everything
+    """
+    LINE_WIDTH = 100
+    MIN_ROWS = 100
+    MAX_COLS = 20
+
+    # Split into lines
+    lines = text.split('\n')
+
+    # Wrap lines that exceed width
+    wrapped = []
+    for line in lines:
+        if len(line) > LINE_WIDTH:
+            for i in range(0, len(line), LINE_WIDTH):
+                wrapped.append(line[i:i + LINE_WIDTH])
+        else:
+            wrapped.append(line)
+
+    # Calculate layout - expand rows if needed to fit everything
+    num_cols = (len(wrapped) + MIN_ROWS - 1) // MIN_ROWS  # ceil division
+    num_rows = MIN_ROWS
+
+    if num_cols > MAX_COLS:
+        num_cols = MAX_COLS
+        num_rows = (len(wrapped) + MAX_COLS - 1) // MAX_COLS  # ceil division
+
+    # Build columns
+    cols = []
+    for i in range(num_cols):
+        col = wrapped[i * num_rows:(i + 1) * num_rows]
+        # Pad column to num_rows
+        while len(col) < num_rows:
+            col.append("")
+        cols.append(col)
+
+    # Helper: center headers, left-justify code
+    def format_cell(cell: str) -> str:
+        if cell.startswith('===') or cell.startswith('##'):
+            return cell.center(LINE_WIDTH)
+        return cell.ljust(LINE_WIDTH)
+
+    # Build result row by row (with leading separator for alignment)
+    result_lines = []
+    for row in range(num_rows):
+        row_parts = [format_cell(cols[c][row]) for c in range(num_cols)]
+        result_lines.append("| " + " | ".join(row_parts) + " |")
+
+    result = '\n'.join(result_lines)
+
+    log(f"Git diff formatted: {len(lines)} lines -> {len(wrapped)} wrapped -> {num_cols} cols x {num_rows} rows")
+
+    return result
+
+
 async def send_git_diff(force: bool = False):
     """Send the current git diff to Spectacles."""
-    global client_connection, spectacles_connected, last_git_diff
+    global client_connection, spectacles_connected
 
-    log(f"send_git_diff called: force={force}, client_connection={client_connection is not None}, spectacles_connected={spectacles_connected}")
+    log(f"send_git_diff called: force={force}")
 
-    if not client_connection or not spectacles_connected:
-        log("Cannot send git diff - no Spectacles connected")
-        return
-
-    log("Calling get_git_diff()...")
+    # 1. Get raw diff
     diff_output = get_git_diff()
-    log(f"get_git_diff returned: {diff_output is not None}, length={len(diff_output) if diff_output else 0}")
-
     if diff_output is None:
         log("No git diff available")
         return
 
-    # Skip if diff is the same as last time (unless forced)
-    if not force and diff_output == last_git_diff:
+    # 2. Format for display
+    formatted_diff = format_git_diff_for_display(diff_output)
+
+    # 3. Read previous from file (if exists)
+    previous_diff = ""
+    if GIT_DIFF_CACHE_FILE.exists():
+        try:
+            previous_diff = GIT_DIFF_CACHE_FILE.read_text()
+        except Exception as e:
+            log(f"Could not read cache file: {e}")
+
+    # 4. Skip if unchanged (unless forced)
+    if not force and formatted_diff == previous_diff:
         log("Git diff unchanged, skipping")
         return
 
-    last_git_diff = diff_output
+    # 5. Save to file
+    try:
+        GIT_DIFF_CACHE_FILE.write_text(formatted_diff)
+        log(f"Saved git diff to {GIT_DIFF_CACHE_FILE}")
+    except Exception as e:
+        log(f"Could not write cache file: {e}")
+
+    # 6. Send to Spectacles (if connected)
+    if not client_connection or not spectacles_connected:
+        log("Cannot send git diff - no Spectacles connected (but saved to file)")
+        return
 
     message = {
         'type': 'git_diff',
-        'data': diff_output
+        'data': formatted_diff
     }
 
     log("=" * 60)
     log("SENDING GIT DIFF:")
-    log("=" * 60)
-    log(f"   Data length: {len(diff_output)} characters")
-    if diff_output:
-        preview = diff_output[:200].replace('\n', '\\n')
-        log(f"   Preview: {preview}...")
-    else:
-        log("   (empty diff - no uncommitted changes)")
+    log(f"   {len(diff_output)} chars -> {len(formatted_diff)} chars")
     log("=" * 60)
 
     try:
@@ -686,8 +756,17 @@ async def main():
     repo_handler = RepoChangeHandler(loop)
     repo_observer = Observer()
     repo_observer.schedule(repo_handler, str(REPO_PATH), recursive=True)
+    # Also watch .git directory to catch staging/commit operations
+    git_dir = REPO_PATH / '.git'
+    if git_dir.exists():
+        repo_observer.schedule(repo_handler, str(git_dir), recursive=True)
+        log(f"   {git_dir} (for git operations)")
     repo_observer.start()
     log(f"Repository watcher started successfully")
+
+    # Manual trigger on startup (like chokidar ignoreInitial: false)
+    log("Triggering initial git diff...")
+    asyncio.run_coroutine_threadsafe(send_git_diff(force=True), loop)
 
     log("=" * 60)
     log("")

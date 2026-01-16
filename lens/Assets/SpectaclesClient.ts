@@ -33,10 +33,6 @@ export class SpectaclesClient extends BaseScriptComponent {
     private readonly MAX_CONTENT_WIDTH = 100;
     private completeConversation: string[] = [];
 
-    // Git diff formatting constants
-    private readonly GIT_DIFF_LINE_WIDTH = 60;
-    private readonly GIT_DIFF_ROWS_PER_COLUMN = 100;
-    private readonly MAX_GIT_DIFF_COLUMNS = 20;
 
     onAwake() {
         print("ServerTextDisplay: Script initialized");
@@ -422,82 +418,13 @@ export class SpectaclesClient extends BaseScriptComponent {
     }
 
     updateGitDiffText(newText: string) {
-        print("ServerTextDisplay: updateGitDiffText called with: " + newText);
+        // Text is pre-formatted by Mac server, just display it
         if (this.gitDiffText) {
-            const { formatted, numCols, numRows } = this.formatGitDiff(newText);
-            this.gitDiffText.text = formatted;
-            print("ServerTextDisplay: Git diff text component updated successfully");
-
-            // Send display stats back to Mac
-            if (this.socket && this.connected) {
-                const stats = {
-                    type: "display_stats",
-                    panel: "git_diff",
-                    chars: formatted.length,
-                    columns: numCols,
-                    rows: numRows
-                };
-                this.socket.send(JSON.stringify(stats));
-                print("ServerTextDisplay: Sent display_stats to Mac");
-            }
+            this.gitDiffText.text = newText;
+            print(`ServerTextDisplay: Git diff updated (${newText.length} chars)`);
         } else {
             print("ServerTextDisplay: ERROR - Git diff text component not assigned!");
         }
-    }
-
-    formatGitDiff(text: string): { formatted: string, numCols: number, numRows: number } {
-        const W = this.GIT_DIFF_LINE_WIDTH;
-        const ROWS = this.GIT_DIFF_ROWS_PER_COLUMN;
-
-        // Split text into lines
-        const lines = text.split('\n');
-
-        // Wrap each line that exceeds width
-        const wrapped: string[] = [];
-        for (const line of lines) {
-            if (line.length > W) {
-                // Chunk the line into pieces of width W
-                for (let i = 0; i < line.length; i += W) {
-                    wrapped.push(line.substring(i, i + W));
-                }
-            } else {
-                wrapped.push(line);
-            }
-        }
-
-        // Calculate number of columns needed, capped at max
-        const numCols = Math.min(Math.ceil(wrapped.length / ROWS), this.MAX_GIT_DIFF_COLUMNS);
-
-        // Only take the first (numCols * ROWS) wrapped lines
-        const displayWrapped = wrapped.slice(0, numCols * ROWS);
-
-        // Split wrapped lines into columns
-        const cols: string[][] = [];
-        for (let i = 0; i < numCols; i++) {
-            cols.push(displayWrapped.slice(i * ROWS, (i + 1) * ROWS));
-        }
-
-        // Pad each column to ROWS length with empty strings
-        for (const col of cols) {
-            while (col.length < ROWS) {
-                col.push("");
-            }
-        }
-
-        // Build result by joining columns row by row
-        const resultLines: string[] = [];
-        for (let row = 0; row < ROWS; row++) {
-            const rowParts = cols.map(col => col[row].padEnd(W));
-            const rowWidths = rowParts.map(p => p.length);
-            if (row < 5) {
-                print(`Row ${row}: widths=[${rowWidths.join(',')}] total=${rowParts.join(' | ').length}`);
-            }
-            resultLines.push(rowParts.join(" | "));
-        }
-
-        const result = resultLines.join('\n');
-        print(`GitDiff display: ${numCols} columns x ${ROWS} rows = ${result.length} chars`);
-        return { formatted: result, numCols: numCols, numRows: ROWS };
     }
 
 }
