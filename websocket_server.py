@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-WebSocket client for Spectacles that connects to the relay server.
+WebSocket server for Spectacles that accepts direct connections.
 Sends screen content to connected Spectacles in real-time.
 """
 
@@ -24,13 +24,12 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-# Relay server configuration
-RELAY_URL = os.environ.get("RELAY_URL", "https://spectacles-relay-qbeff114ve4r.deno.dev")
-DEVICE_SECRET = os.environ.get("DEVICE_SECRET", "")
+# Server configuration
+SERVER_PORT = int(os.environ.get("SERVER_PORT", "8765"))
 RECONNECT_DELAY = 10  # seconds between reconnection attempts
 
-# Store the WebSocket connection to relay
-relay_connection = None
+# Store the WebSocket connection to Spectacles client
+client_connection = None
 
 # Store last sent message to avoid duplicates
 last_sent_message = None
@@ -39,7 +38,7 @@ last_sent_message = None
 sun_times_data = None
 location_data = None
 
-# Flag to track if Spectacles client is connected (via relay)
+# Flag to track if Spectacles client is connected
 spectacles_connected = False
 
 # Path to this repository for git diff
@@ -58,39 +57,39 @@ def sanitize_to_ascii(text):
     """
     # Replace common unicode with ASCII equivalents
     replacements = {
-        '│': '|',
-        '─': '-',
-        '┌': '+',
-        '└': '+',
-        '┐': '+',
-        '┘': '+',
-        '├': '+',
-        '┤': '+',
-        '┬': '+',
-        '┴': '+',
-        '┼': '+',
-        '"': '"',
-        '"': '"',
-        ''': "'",
-        ''': "'",
-        '—': '--',
-        '–': '-',
-        '…': '...',
-        '•': '*',
-        '→': '->',
-        '←': '<-',
-        '↑': '^',
-        '↓': 'v',
-        '≤': '<=',
-        '≥': '>=',
-        '≠': '!=',
-        '×': 'x',
-        '÷': '/',
-        '±': '+/-',
-        '°': ' deg',
-        '©': '(c)',
-        '®': '(R)',
-        '™': '(TM)',
+        '\u2502': '|',  # Box drawing vertical
+        '\u2500': '-',  # Box drawing horizontal
+        '\u250c': '+',  # Box drawing down and right
+        '\u2514': '+',  # Box drawing up and right
+        '\u2510': '+',  # Box drawing down and left
+        '\u2518': '+',  # Box drawing up and left
+        '\u251c': '+',  # Box drawing vertical and right
+        '\u2524': '+',  # Box drawing vertical and left
+        '\u252c': '+',  # Box drawing down and horizontal
+        '\u2534': '+',  # Box drawing up and horizontal
+        '\u253c': '+',  # Box drawing vertical and horizontal
+        '\u201c': '"',  # Left double quote
+        '\u201d': '"',  # Right double quote
+        '\u2018': "'",  # Left single quote
+        '\u2019': "'",  # Right single quote
+        '\u2014': '--', # Em dash
+        '\u2013': '-',  # En dash
+        '\u2026': '...', # Ellipsis
+        '\u2022': '*',  # Bullet
+        '\u2192': '->', # Right arrow
+        '\u2190': '<-', # Left arrow
+        '\u2191': '^',  # Up arrow
+        '\u2193': 'v',  # Down arrow
+        '\u2264': '<=', # Less than or equal
+        '\u2265': '>=', # Greater than or equal
+        '\u2260': '!=', # Not equal
+        '\u00d7': 'x',  # Multiplication sign
+        '\u00f7': '/',  # Division sign
+        '\u00b1': '+/-', # Plus-minus
+        '\u00b0': ' deg', # Degree
+        '\u00a9': '(c)', # Copyright
+        '\u00ae': '(R)', # Registered
+        '\u2122': '(TM)', # Trademark
         '\u00a0': ' ',  # Non-breaking space
     }
     for old, new in replacements.items():
@@ -150,13 +149,13 @@ def get_git_diff():
 
 
 async def send_git_diff(force: bool = False):
-    """Send the current git diff to Spectacles via relay."""
-    global relay_connection, spectacles_connected, last_git_diff
+    """Send the current git diff to Spectacles."""
+    global client_connection, spectacles_connected, last_git_diff
 
-    log(f"send_git_diff called: force={force}, relay_connection={relay_connection is not None}, spectacles_connected={spectacles_connected}")
+    log(f"send_git_diff called: force={force}, client_connection={client_connection is not None}, spectacles_connected={spectacles_connected}")
 
-    if not relay_connection or not spectacles_connected:
-        log("Cannot send git diff - no Spectacles connected via relay")
+    if not client_connection or not spectacles_connected:
+        log("Cannot send git diff - no Spectacles connected")
         return
 
     log("Calling get_git_diff()...")
@@ -191,8 +190,8 @@ async def send_git_diff(force: bool = False):
     log("=" * 60)
 
     try:
-        await relay_connection.send(json.dumps(message))
-        log("   Git diff sent through relay")
+        await client_connection.send(json.dumps(message))
+        log("   Git diff sent to Spectacles")
     except Exception as e:
         log(f"   Failed to send git diff: {e}")
 
@@ -340,7 +339,7 @@ class ClaudeConversationHandler(FileSystemEventHandler):
         message = extract_latest_event(event.src_path)
 
         if message:
-            # Schedule sending the message through relay
+            # Schedule sending the message to Spectacles
             asyncio.run_coroutine_threadsafe(
                 send_text_message(message),
                 self.loop
@@ -387,8 +386,8 @@ class RepoChangeHandler(FileSystemEventHandler):
 
 
 async def send_text_message(message):
-    """Send a text message through the relay to Spectacles."""
-    global last_sent_message, relay_connection, spectacles_connected
+    """Send a text message to Spectacles."""
+    global last_sent_message, client_connection, spectacles_connected
 
     # Avoid sending duplicate messages
     if message == last_sent_message:
@@ -397,8 +396,8 @@ async def send_text_message(message):
 
     last_sent_message = message
 
-    if not relay_connection or not spectacles_connected:
-        log("Cannot send text - no Spectacles connected via relay")
+    if not client_connection or not spectacles_connected:
+        log("Cannot send text - no Spectacles connected")
         return
 
     # Wrap text message in consistent JSON format
@@ -417,21 +416,21 @@ async def send_text_message(message):
     log("=" * 60)
 
     try:
-        await relay_connection.send(json_string)
-        log("   Text message sent through relay")
+        await client_connection.send(json_string)
+        log("   Text message sent to Spectacles")
     except Exception as e:
         log(f"   Failed to send text: {e}")
 
 
 async def jpeg_screenshot_loop():
     """Capture and send JPEG screenshots, skip if unchanged."""
-    global relay_connection, spectacles_connected
+    global client_connection, spectacles_connected
 
     prev_hash = None
 
     while True:
         # Only send if Spectacles is connected
-        if not relay_connection or not spectacles_connected:
+        if not client_connection or not spectacles_connected:
             await asyncio.sleep(1.0)
             continue
 
@@ -464,17 +463,13 @@ async def jpeg_screenshot_loop():
             })
 
             log(f"Sending JPEG: {screenshot.width}x{screenshot.height}, {len(jpeg_bytes):,} bytes")
-            await relay_connection.send(message)
-
-            # Wait for acknowledgment (will come as a message from relay)
-            # The relay will forward the ack from Spectacles
-            # We handle acks in the message handler
+            await client_connection.send(message)
 
             # Wait 1 second before next frame
             await asyncio.sleep(1.0)
 
         except websockets.exceptions.ConnectionClosed:
-            log("Connection to relay lost during screenshot send, waiting for reconnection...")
+            log("Connection to Spectacles lost during screenshot send, waiting for reconnection...")
             await asyncio.sleep(1.0)
             continue
         except Exception as e:
@@ -482,8 +477,8 @@ async def jpeg_screenshot_loop():
             await asyncio.sleep(1.0)
 
 
-async def handle_relay_messages(websocket):
-    """Handle incoming messages from the relay (forwarded from Spectacles)."""
+async def handle_client_messages(websocket):
+    """Handle incoming messages from Spectacles client."""
     global spectacles_connected, sun_times_data
 
     async for message in websocket:
@@ -491,86 +486,8 @@ async def handle_relay_messages(websocket):
             data = json.loads(message)
             msg_type = data.get('type', '')
 
-            if msg_type == 'relay_notification':
-                # Handle relay notifications
-                event = data.get('event', '')
-
-                if event == 'client_connected':
-                    # Spectacles client connected to relay
-                    spectacles_connected = True
-                    log("=" * 60)
-                    log("SPECTACLES CONNECTED (via relay)")
-                    log("=" * 60)
-
-                    # Send initialization message
-                    color, phase = get_sun_phase_color(sun_times_data) if sun_times_data else ((1.0, 0.0, 0.0, 1.0), "night")
-                    init_message = {
-                        'type': 'init',
-                        'width': 2048,
-                        'height': 1152,
-                        'color': {
-                            'r': color[0],
-                            'g': color[1],
-                            'b': color[2],
-                            'a': color[3]
-                        },
-                        'last_message': last_sent_message if last_sent_message else None
-                    }
-                    log(f"Sending init: {phase} - {color}")
-                    await websocket.send(json.dumps(init_message))
-
-                    # Wait for handshake to complete before sending git diff
-                    await asyncio.sleep(1)
-                    await send_git_diff(force=True)
-
-                elif event == 'client_disconnected':
-                    # Spectacles client disconnected from relay
-                    spectacles_connected = False
-                    log("=" * 60)
-                    log("SPECTACLES DISCONNECTED (via relay)")
-                    log("=" * 60)
-
-                elif event == 'connected':
-                    # Our own connection confirmation
-                    peer_connected = data.get('peerConnected', False)
-                    log(f"Connected to relay (peer already connected: {peer_connected})")
-                    if peer_connected:
-                        # Spectacles was already connected before we joined
-                        spectacles_connected = True
-                        log("=" * 60)
-                        log("SPECTACLES ALREADY CONNECTED (via relay)")
-                        log("=" * 60)
-
-                        # Send initialization message
-                        color, phase = get_sun_phase_color(sun_times_data) if sun_times_data else ((1.0, 0.0, 0.0, 1.0), "night")
-                        init_message = {
-                            'type': 'init',
-                            'width': 2048,
-                            'height': 1152,
-                            'color': {
-                                'r': color[0],
-                                'g': color[1],
-                                'b': color[2],
-                                'a': color[3]
-                            },
-                            'last_message': last_sent_message if last_sent_message else None
-                        }
-                        log(f"Sending init: {phase} - {color}")
-                        await websocket.send(json.dumps(init_message))
-
-                        # Wait for handshake to complete before sending git diff
-                        await asyncio.sleep(1)
-                        await send_git_diff(force=True)
-
-                elif event == 'server_disconnected':
-                    log("Received server_disconnected (shouldn't happen, we are the server)")
-
-                else:
-                    log(f"Unknown relay notification event: {event}")
-
-            elif msg_type == 'hello':
+            if msg_type == 'hello':
                 # Hello message from Spectacles - initiate handshake
-                spectacles_connected = True
                 log("")
                 log("*" * 60)
                 log("*" * 60)
@@ -603,7 +520,7 @@ async def handle_relay_messages(websocket):
                 await send_git_diff(force=True)
 
             elif msg_type == 'ack':
-                # Acknowledgment from Spectacles (forwarded by relay)
+                # Acknowledgment from Spectacles
                 log(f"Received ack from Spectacles")
 
             elif msg_type == 'display_stats':
@@ -619,119 +536,96 @@ async def handle_relay_messages(websocket):
                 log(f"   Total chars: {chars}")
                 log("=" * 60)
 
-            elif msg_type == 'error':
-                log(f"Error from relay: {data.get('message', 'Unknown error')}")
-
             else:
-                # Other messages from Spectacles (forwarded by relay)
+                # Other messages from Spectacles
                 log(f"Received from Spectacles: {msg_type}")
 
         except json.JSONDecodeError:
-            # Plain text message (like "ack")
-            if message == "ack":
-                log("Received ack from Spectacles")
+            # Plain text message (like "ACK")
+            if message.upper() == "ACK":
+                log("Received ACK from Spectacles")
             else:
                 log(f"Received non-JSON message: {message[:100]}")
         except Exception as e:
-            log(f"Error handling relay message: {e}")
+            log(f"Error handling client message: {e}")
 
 
-async def check_relay_status(websocket):
-    """Periodically send application-level ping to verify relay connection."""
-    global relay_connection
+async def handle_client(websocket):
+    """Handle a single client connection."""
+    global client_connection, spectacles_connected, sun_times_data
 
-    while True:
-        await asyncio.sleep(10)  # Check every 10 seconds
+    client_connection = websocket
+    spectacles_connected = True
 
-        try:
-            # Send application-level ping through WebSocket
-            ping_msg = json.dumps({"type": "ping", "timestamp": datetime.datetime.now().isoformat()})
-            await websocket.send(ping_msg)
-            log("PING: Sent application ping - connection alive")
+    log("=" * 60)
+    log("SPECTACLES CONNECTED")
+    log("=" * 60)
+    log(f"   Remote address: {websocket.remote_address}")
+    log("=" * 60)
 
-        except asyncio.CancelledError:
-            return
-        except Exception as e:
-            log(f"PING FAILED: {e} - connection may be dead")
-            # If we can't send, connection is likely dead
-            try:
-                await websocket.close(1000, "Ping failed")
-            except:
-                pass
-            return
+    # Send initialization message immediately
+    color, phase = get_sun_phase_color(sun_times_data) if sun_times_data else ((1.0, 0.0, 0.0, 1.0), "night")
+    init_message = {
+        'type': 'init',
+        'width': 2048,
+        'height': 1152,
+        'color': {
+            'r': color[0],
+            'g': color[1],
+            'b': color[2],
+            'a': color[3]
+        },
+        'last_message': last_sent_message if last_sent_message else None
+    }
+    log(f"Sending init: {phase} - {color}")
+    await websocket.send(json.dumps(init_message))
 
+    # Wait for handshake to complete before sending git diff
+    await asyncio.sleep(1)
+    await send_git_diff(force=True)
 
-async def connect_to_relay():
-    """Connect to the relay server as a WebSocket client."""
-    global relay_connection, spectacles_connected
-
-    if not DEVICE_SECRET:
-        log("ERROR: DEVICE_SECRET not set in .env file")
-        log("   Cannot connect to relay without device secret")
-        return
-
-    # Build WebSocket URL for server endpoint
-    ws_url = RELAY_URL.replace('https://', 'wss://').replace('http://', 'ws://')
-    ws_url = f"{ws_url}/ws/server?device_secret={DEVICE_SECRET}"
-
-    log(f"Connecting to relay: {ws_url[:50]}...")
-
-    while True:
-        try:
-            async with websockets.connect(
-                ws_url,
-                close_timeout=5,
-                ping_interval=10,  # Send ping every 10 seconds
-                ping_timeout=5,    # Wait 5 seconds for pong before considering dead
-            ) as websocket:
-                relay_connection = websocket
-                log("=" * 60)
-                log("CONNECTED TO RELAY SERVER")
-                log("=" * 60)
-                log(f"   Relay URL: {RELAY_URL}")
-                log(f"   Device Secret: {DEVICE_SECRET[:8]}...")
-                log("   Waiting for Spectacles to connect...")
-                log("=" * 60)
-
-                # Run message handler AND status checker concurrently
-                await asyncio.gather(
-                    handle_relay_messages(websocket),
-                    check_relay_status(websocket),
-                    return_exceptions=True
-                )
-
-        except websockets.exceptions.ConnectionClosed as e:
-            log(f"Connection to relay closed: {e}")
-        except Exception as e:
-            log(f"Error connecting to relay: {e}")
-
-        # Reset state
-        relay_connection = None
+    try:
+        # Handle incoming messages
+        await handle_client_messages(websocket)
+    except websockets.exceptions.ConnectionClosed as e:
+        log(f"Client connection closed: {e}")
+    finally:
+        client_connection = None
         spectacles_connected = False
+        log("=" * 60)
+        log("SPECTACLES DISCONNECTED")
+        log("=" * 60)
 
-        # Wait before reconnecting
-        log(f"Reconnecting to relay in {RECONNECT_DELAY} seconds...")
-        await asyncio.sleep(RECONNECT_DELAY)
+
+async def start_server():
+    """Start the WebSocket server."""
+    log("=" * 60)
+    log("STARTING WEBSOCKET SERVER")
+    log("=" * 60)
+    log(f"   Port: {SERVER_PORT}")
+    log("   Waiting for Spectacles to connect...")
+    log("=" * 60)
+
+    async with websockets.serve(
+        handle_client,
+        "0.0.0.0",
+        SERVER_PORT,
+        ping_interval=10,
+        ping_timeout=5,
+    ) as server:
+        log(f"WebSocket server listening on port {SERVER_PORT}")
+        await asyncio.Future()  # Run forever
 
 
 async def main():
-    """Start the relay client and file watcher."""
+    """Start the WebSocket server and file watchers."""
     global sun_times_data, location_data
 
     log("=" * 60)
-    log("STARTING MAC SERVER (RELAY CLIENT MODE)")
+    log("STARTING MAC SERVER (DIRECT CONNECTION MODE)")
     log("=" * 60)
-    log(f"Relay URL: {RELAY_URL}")
-    log(f"Device Secret: {DEVICE_SECRET[:8]}..." if DEVICE_SECRET else "Device Secret: NOT SET")
+    log(f"Server Port: {SERVER_PORT}")
     log("=" * 60)
-
-    if not DEVICE_SECRET:
-        log("")
-        log("ERROR: DEVICE_SECRET not configured!")
-        log("   Please set DEVICE_SECRET in .env file")
-        log("   Both Mac server and Spectacles need the same secret")
-        log("")
-        return
 
     # Fetch and log location and sun times
     log("")
@@ -801,9 +695,9 @@ async def main():
     # Main loop - never exit, always retry
     while True:
         try:
-            # Start both the relay connection and screenshot loop concurrently
+            # Start both the server and screenshot loop concurrently
             await asyncio.gather(
-                connect_to_relay(),
+                start_server(),
                 jpeg_screenshot_loop()
             )
         except asyncio.CancelledError:

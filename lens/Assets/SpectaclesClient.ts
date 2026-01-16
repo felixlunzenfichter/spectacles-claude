@@ -1,4 +1,4 @@
-import { DEVICE_SECRET, RELAY_URL } from "./secrets";
+import { SERVER_URL } from "./secrets";
 
 @component
 export class SpectaclesClient extends BaseScriptComponent {
@@ -11,8 +11,8 @@ export class SpectaclesClient extends BaseScriptComponent {
     @input
     image: Image;
 
-    // Build WebSocket URL for relay connection
-    private readonly relayWsUrl = `${RELAY_URL.replace('https', 'wss')}/ws/client?device_secret=${DEVICE_SECRET}`;
+    // Build WebSocket URL for direct connection to Mac server
+    private readonly serverWsUrl = `${SERVER_URL.replace('https', 'wss')}`;
 
     private startTime: number;
     private socket: WebSocket = null;
@@ -59,19 +59,10 @@ export class SpectaclesClient extends BaseScriptComponent {
     processJSONMessage(message: any) {
         // Handle message based on type
         switch (message.type) {
-            case "relay_notification":
-                // Just log relay notifications - hello is sent every 3s anyway
-                print("SpectaclesClient: Relay notification - " + message.event);
-                if (message.event === "peer_disconnected") {
-                    this.peerConnected = false;
-                    this.updateText("Mac disconnected from relay");
-                }
-                break;
-
             case "init":
                 print("ServerTextDisplay: Received init message");
 
-                // Mac has responded - peer is now connected
+                // Mac server responded - connection complete
                 this.peerConnected = true;
 
                 // Set color
@@ -138,12 +129,12 @@ export class SpectaclesClient extends BaseScriptComponent {
         print("***  SPECTACLES CONNECTION ATTEMPT #" + this.connectionAttemptCount + "  ***");
         print("************************************************************");
         print("   Timestamp: " + timestamp);
-        print("   Relay URL: " + this.relayWsUrl);
+        print("   Server URL: " + this.serverWsUrl);
         print("************************************************************");
 
         try {
-            // Create WebSocket connection directly to relay
-            this.socket = this.internetModule.createWebSocket(this.relayWsUrl);
+            // Create WebSocket connection directly to Mac server
+            this.socket = this.internetModule.createWebSocket(this.serverWsUrl);
 
             // Set up event handlers
             this.socket.onopen = (event) => {
@@ -157,7 +148,7 @@ export class SpectaclesClient extends BaseScriptComponent {
                 print("   Socket readyState: " + this.socket.readyState);
                 print("************************************************************");
                 this.connected = true;
-                this.updateText("Connected to relay, waiting for Mac...");
+                this.updateText("Connected to Mac server");
                 // Send hello message to initiate handshake
                 this.socket.send(JSON.stringify({ type: "hello" }));
                 print("SpectaclesClient: Sent hello message after socket open");
@@ -206,7 +197,7 @@ export class SpectaclesClient extends BaseScriptComponent {
                 print("   Error timestamp: " + errTimestamp);
                 print("   Connection attempt #: " + this.connectionAttemptCount);
                 print("   Error event details: " + JSON.stringify(event));
-                print("   Relay URL: " + this.relayWsUrl);
+                print("   Server URL: " + this.serverWsUrl);
                 print("   Socket state: " + (this.socket ? this.socket.readyState : "null"));
                 print("   Was connected: " + this.connected);
                 print("   Peer was connected: " + this.peerConnected);
@@ -244,7 +235,7 @@ export class SpectaclesClient extends BaseScriptComponent {
             print("SpectaclesClient: Error: " + error);
             print("SpectaclesClient: Error type: " + typeof error);
             print("SpectaclesClient: Error message: " + (error.message || "No message"));
-            print("SpectaclesClient: Relay URL: " + this.relayWsUrl);
+            print("SpectaclesClient: Server URL: " + this.serverWsUrl);
             this.updateText("Failed to connect!");
         }
     }
@@ -281,14 +272,14 @@ export class SpectaclesClient extends BaseScriptComponent {
             }
         }
 
-        // If connected to relay but peer not connected, send hello every 3s
+        // If connected but haven't received init yet, send hello every 3s
         if (this.connected && !this.peerConnected) {
             const currentTime = getTime();
             if (currentTime - this.lastHelloTime >= 3.0) {
                 this.helloCount++;
                 this.socket.send(JSON.stringify({ type: "hello" }));
-                this.updateText(`Connected to relay\nWaiting for Mac...\nSending hello #${this.helloCount}`);
-                print("SpectaclesClient: Sending hello (waiting for Mac)");
+                this.updateText(`Connected to server\nWaiting for init...\nSending hello #${this.helloCount}`);
+                print("SpectaclesClient: Sending hello (waiting for init)");
                 this.lastHelloTime = currentTime;
             }
         }
