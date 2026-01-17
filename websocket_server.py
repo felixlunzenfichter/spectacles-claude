@@ -15,7 +15,6 @@ import base64
 import io
 import time
 import hashlib
-import subprocess
 from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -42,74 +41,8 @@ location_data = None
 # Flag to track if Spectacles client is connected
 spectacles_connected = False
 
-# Path to this script's directory (for finding get-diff.sh)
-SCRIPT_DIR = Path(__file__).parent.resolve()
-
-# Git diff cache file path
-GIT_DIFF_CACHE_FILE = Path("/tmp/spectacles-git-diff.txt")
-
-
-def sanitize_to_ascii(text):
-    """Replace or remove non-ASCII characters from text.
-
-    Replaces common unicode symbols with ASCII equivalents,
-    and replaces any remaining non-ASCII characters with '?'.
-    Keeps only printable ASCII (32-126) plus newlines and tabs.
-    """
-    # Replace common unicode with ASCII equivalents
-    replacements = {
-        '\u2502': '|',  # Box drawing vertical
-        '\u2500': '-',  # Box drawing horizontal
-        '\u250c': '+',  # Box drawing down and right
-        '\u2514': '+',  # Box drawing up and right
-        '\u2510': '+',  # Box drawing down and left
-        '\u2518': '+',  # Box drawing up and left
-        '\u251c': '+',  # Box drawing vertical and right
-        '\u2524': '+',  # Box drawing vertical and left
-        '\u252c': '+',  # Box drawing down and horizontal
-        '\u2534': '+',  # Box drawing up and horizontal
-        '\u253c': '+',  # Box drawing vertical and horizontal
-        '\u201c': '"',  # Left double quote
-        '\u201d': '"',  # Right double quote
-        '\u2018': "'",  # Left single quote
-        '\u2019': "'",  # Right single quote
-        '\u2014': '--', # Em dash
-        '\u2013': '-',  # En dash
-        '\u2026': '...', # Ellipsis
-        '\u2022': '*',  # Bullet
-        '\u2192': '->', # Right arrow
-        '\u2190': '<-', # Left arrow
-        '\u2191': '^',  # Up arrow
-        '\u2193': 'v',  # Down arrow
-        '\u2264': '<=', # Less than or equal
-        '\u2265': '>=', # Greater than or equal
-        '\u2260': '!=', # Not equal
-        '\u00d7': 'x',  # Multiplication sign
-        '\u00f7': '/',  # Division sign
-        '\u00b1': '+/-', # Plus-minus
-        '\u00b0': ' deg', # Degree
-        '\u00a9': '(c)', # Copyright
-        '\u00ae': '(R)', # Registered
-        '\u2122': '(TM)', # Trademark
-        '\u00a0': ' ',  # Non-breaking space
-    }
-    for old, new in replacements.items():
-        text = text.replace(old, new)
-
-    # Replace remaining non-ASCII with ? and filter to printable ASCII
-    result = []
-    for c in text:
-        code = ord(c)
-        if code < 128:
-            # Keep printable ASCII (32-126), newlines, tabs, and carriage returns
-            if 32 <= code <= 126 or c in '\n\t\r':
-                result.append(c)
-            # Skip other control characters
-        else:
-            # Replace non-ASCII with ?
-            result.append('?')
-
-    return ''.join(result)
+# Columns JSON file (written by realtime-claude mac-server.js)
+COLUMNS_JSON_PATH = Path.home() / ".git-diff-columns.json"
 
 
 LOG_FILE = Path("/tmp/spectacles-server.log")
@@ -126,171 +59,62 @@ def log(message):
         pass
 
 
-def get_git_diff():
-    """Get the git diff output for the spectacles-claude repository.
-
-    Runs the get-diff.sh script which provides comprehensive git status including:
-    - Branch status with ahead/behind count
-    - Unstaged and staged changes with function context
-    - Untracked files with their content
-    - Recent commit history with LOCAL/REMOTE markers
-    """
-    try:
-        script_path = SCRIPT_DIR / 'scripts' / 'get-diff.sh'
-        log(f"Running script: {script_path}")
-        result = subprocess.run(
-            [str(script_path)],
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            timeout=30
-        )
-        log(f"Script result: returncode={result.returncode}, stdout_len={len(result.stdout)}, stderr={result.stderr[:100] if result.stderr else 'none'}")
-        if result.returncode == 0:
-            # Sanitize output to ASCII-only characters
-            return sanitize_to_ascii(result.stdout)
-        return None
-    except Exception as e:
-        log(f"Error getting git diff: {e}")
-        return None
+# Cache last hash to avoid sending unchanged diff
+_last_columns_hash = None
 
 
-def format_git_diff_for_display(text: str) -> str:
-    """Format git diff into multi-column layout for Spectacles display.
+def columns_to_piped_format(columns):
+    """Convert columns array to piped display format for Spectacles."""
+    if not columns:
+        return ""
 
-    Algorithm:
-    - Line width: 100 chars
-    - Min rows per column: 100
-    - Max columns: 20
-    - If content exceeds 20 cols × 100 rows, increase rows to fit everything
-    """
     LINE_WIDTH = 100
-    MIN_ROWS = 100
-    MAX_COLS = 20
+    rows_per_col = [col.split('\n') for col in columns]
+    num_rows = max(len(rows) for rows in rows_per_col)
 
-    # Split into lines
-    lines = text.split('\n')
+    for rows in rows_per_col:
+        while len(rows) < num_rows:
+            rows.append('')
 
-    # Wrap lines that exceed width
-    wrapped = []
-    for line in lines:
-        if len(line) > LINE_WIDTH:
-            for i in range(0, len(line), LINE_WIDTH):
-                wrapped.append(line[i:i + LINE_WIDTH])
-        else:
-            wrapped.append(line)
-
-    # Calculate layout - expand rows if needed to fit everything
-    num_cols = (len(wrapped) + MIN_ROWS - 1) // MIN_ROWS  # ceil division
-    num_rows = MIN_ROWS
-
-    if num_cols > MAX_COLS:
-        num_cols = MAX_COLS
-        num_rows = (len(wrapped) + MAX_COLS - 1) // MAX_COLS  # ceil division
-
-    # Build columns
-    cols = []
-    for i in range(num_cols):
-        col = wrapped[i * num_rows:(i + 1) * num_rows]
-        # Pad column to num_rows
-        while len(col) < num_rows:
-            col.append("")
-        cols.append(col)
-
-    # Helper: center headers, left-justify code
-    def format_cell(cell: str) -> str:
+    def format_cell(cell):
         if cell.startswith('===') or cell.startswith('##'):
             return cell.center(LINE_WIDTH)
         return cell.ljust(LINE_WIDTH)
 
-    # Build result row by row (with leading separator for alignment)
     result_lines = []
-    for row in range(num_rows):
-        row_parts = [format_cell(cols[c][row]) for c in range(num_cols)]
+    for row_idx in range(num_rows):
+        row_parts = [format_cell(rows_per_col[col_idx][row_idx]) for col_idx in range(len(columns))]
         result_lines.append("| " + " | ".join(row_parts) + " |")
 
-    result = '\n'.join(result_lines)
-
-    log(f"Git diff formatted: {len(lines)} lines -> {len(wrapped)} wrapped -> {num_cols} cols x {num_rows} rows")
-
-    return result
-
-
-# Cache fingerprint to avoid running full diff script when nothing changed
-_last_fingerprint_hash = None
-
-
-def get_repo_fingerprint():
-    """Get quick fingerprint of repo state (HEAD + status)."""
-    try:
-        # Read target repo from config
-        config_file = Path.home() / ".spectacles-repo"
-        if config_file.exists():
-            repo_path = config_file.read_text().strip()
-        else:
-            return None
-
-        # Quick commands: HEAD hash + porcelain status
-        head = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=repo_path, capture_output=True, text=True, timeout=5
-        )
-        status = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=repo_path, capture_output=True, text=True, timeout=5
-        )
-
-        fingerprint = head.stdout + status.stdout
-        return hashlib.md5(fingerprint.encode()).hexdigest()
-    except Exception:
-        return None
+    return '\n'.join(result_lines)
 
 
 async def send_git_diff(force: bool = False):
-    """Send the current git diff to Spectacles."""
-    global client_connection, spectacles_connected, _last_fingerprint_hash
-
-    # Check fingerprint first (fast) - skip if unchanged
-    fingerprint = get_repo_fingerprint()
-    if not force and fingerprint and fingerprint == _last_fingerprint_hash:
-        return  # Silent skip - nothing changed
-    _last_fingerprint_hash = fingerprint
+    """Send git diff from JSON file to Spectacles."""
+    global client_connection, spectacles_connected, _last_columns_hash
 
     log(f"send_git_diff called: force={force}")
 
-    # 1. Get raw diff (only runs if fingerprint changed)
-    diff_output = get_git_diff()
-    if diff_output is None:
-        log("No git diff available")
+    if not COLUMNS_JSON_PATH.exists():
+        log(f"No columns JSON file at {COLUMNS_JSON_PATH}")
         return
 
-    # 2. Format for display
-    formatted_diff = format_git_diff_for_display(diff_output)
-
-    # 3. Read previous from file (if exists)
-    previous_diff = ""
-    if GIT_DIFF_CACHE_FILE.exists():
-        try:
-            previous_diff = GIT_DIFF_CACHE_FILE.read_text()
-        except Exception as e:
-            log(f"Could not read cache file: {e}")
-
-    # 4. Skip if unchanged (unless forced)
-    if not force and formatted_diff == previous_diff:
-        log("Git diff unchanged, skipping")
-        return
-
-    # 5. Save to file
     try:
-        GIT_DIFF_CACHE_FILE.write_text(formatted_diff)
-        log(f"Saved git diff to {GIT_DIFF_CACHE_FILE}")
+        data = json.loads(COLUMNS_JSON_PATH.read_text())
+        columns = data.get('columns', [])
+        current_hash = data.get('hash', '')
     except Exception as e:
-        log(f"Could not write cache file: {e}")
+        log(f"Failed to read columns JSON: {e}")
+        return
 
-    # 6. Send to Spectacles (if connected)
+    if not force and current_hash and current_hash == _last_columns_hash:
+        return
+    _last_columns_hash = current_hash
+
+    formatted_diff = columns_to_piped_format(columns)
+
     if not client_connection or not spectacles_connected:
-        log("Cannot send git diff - no Spectacles connected (but saved to file)")
+        log("Cannot send git diff - no Spectacles connected")
         return
 
     message = {
@@ -300,7 +124,7 @@ async def send_git_diff(force: bool = False):
 
     log("=" * 60)
     log("SENDING GIT DIFF:")
-    log(f"   {len(diff_output)} chars -> {len(formatted_diff)} chars")
+    log(f"   {len(columns)} columns -> {len(formatted_diff)} chars")
     log("=" * 60)
 
     try:
@@ -453,14 +277,28 @@ class ClaudeConversationHandler(FileSystemEventHandler):
         message = extract_latest_event(event.src_path)
 
         if message:
-            # Schedule sending the message and git diff to Spectacles
             asyncio.run_coroutine_threadsafe(
                 send_text_message(message),
                 self.loop
             )
-            # Also refresh git diff (already deduped via cache file)
+
+
+class ColumnsJsonHandler(FileSystemEventHandler):
+    """Handles file system events for the columns JSON file."""
+
+    def __init__(self, loop):
+        self.loop = loop
+        super().__init__()
+
+    def on_modified(self, event):
+        """Called when the columns JSON file is modified."""
+        if event.is_directory:
+            return
+
+        if Path(event.src_path).name == '.git-diff-columns.json':
+            log("Columns JSON file changed")
             asyncio.run_coroutine_threadsafe(
-                send_git_diff(),
+                send_git_diff(force=True),
                 self.loop
             )
 
@@ -759,6 +597,16 @@ async def main():
         claude_observer.start()
         log(f"Claude conversation watcher started successfully")
 
+    # Start columns JSON watcher (watches ~/.git-diff-columns.json from mac-server)
+    columns_observer = None
+    columns_json_dir = COLUMNS_JSON_PATH.parent
+    if columns_json_dir.exists():
+        columns_handler = ColumnsJsonHandler(loop)
+        columns_observer = Observer()
+        columns_observer.schedule(columns_handler, str(columns_json_dir), recursive=False)
+        columns_observer.start()
+        log(f"Columns JSON watcher started on {columns_json_dir}")
+
     # Trigger initial git diff on startup
     log("Triggering initial git diff...")
     asyncio.run_coroutine_threadsafe(send_git_diff(force=True), loop)
@@ -789,6 +637,9 @@ async def main():
     if claude_observer:
         claude_observer.stop()
         claude_observer.join()
+    if columns_observer:
+        columns_observer.stop()
+        columns_observer.join()
 
 
 if __name__ == "__main__":

@@ -22,7 +22,6 @@ tail -f server.log
 | `start-server-in-window.sh` | no | Internal. AppleScript types into "spectacles" Terminal. Server must run in persistent window, not Claude's bash. |
 | `start-server-and-preview.sh` | no | Internal. Starts websocket_server.py, calls start-lens.sh. Dies when calling bash exits. |
 | `start-lens.sh` | no | Internal. Opens Lens Studio, dismisses dialogs, clicks Preview. |
-| `scripts/get-diff.sh` | no | System. Git diff formatting, used by websocket_server.py. |
 
 ## Logs
 
