@@ -4,8 +4,8 @@ WebSocket server that streams Mac screen content to Snap Spectacles.
 
 ## Quick Start
 
-```bash
-./start-server-in-window.sh
+```
+/start-spectacles
 ```
 
 ## The Story (told by logs)
@@ -201,15 +201,6 @@ Mac Server                    Relay                      Spectacles
     |---[text message]--------->|-------[forward]----------->|
     |---[git_diff]------------->|-------[forward]----------->|
 ```
-
-## Scripts
-
-| Script | Purpose |
-|--------|---------|
-| `start-server-in-window.sh` | Start Mac server (USE THIS) |
-| `start-lens.sh` | Restart Lens Studio |
-| `start-preview.sh` | Open preview panel |
-| `start-server-and-preview.sh` | Both server + preview |
 
 ## User Setup
 

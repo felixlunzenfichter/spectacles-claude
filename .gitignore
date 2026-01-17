@@ -12,4 +12,5 @@ __pycache__/
 
 # IDE/Editor caches
 lens/Cache/
-.claude/
+.claude/settings*
+.claude/todos*
